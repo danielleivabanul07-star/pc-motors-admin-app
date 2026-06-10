@@ -33,6 +33,8 @@ export default function ControlTrabajosMecanicos() {
     costo_piezas: "",
     venta_piezas: "",
     mano_obra: "",
+    metodo_pago: "",
+    pago_recibido: false,
     notas: ""
   };
 
@@ -91,6 +93,20 @@ export default function ControlTrabajosMecanicos() {
     { value: "trabajando", label: "🔧 Trabajando" },
     { value: "listo_para_entrega", label: "✅ Listo para entrega" },
     { value: "finalizado", label: "🏁 Finalizado" }
+  ];
+
+  const metodosPago = [
+    { value: "", label: "Seleccionar método de pago" },
+    { value: "Cash", label: "💵 Cash" },
+    { value: "Zelle", label: "🏦 Zelle" },
+    { value: "Debit Card", label: "💳 Debit Card" },
+    { value: "Credit Card", label: "💳 Credit Card" },
+    { value: "Cash App", label: "💸 Cash App" },
+    { value: "Apple Pay", label: "🍎 Apple Pay" },
+    { value: "Check", label: "🧾 Check" },
+    { value: "Financiamiento", label: "📄 Financiamiento" },
+    { value: "Otro", label: "🔁 Otro" },
+    { value: "Pendiente", label: "⏳ Pendiente" }
   ];
 
   const GOOGLE_REVIEW_URL = "https://g.page/r/CZDnoTatR0yOEAI/review";
@@ -1055,6 +1071,8 @@ export default function ControlTrabajosMecanicos() {
       costo_piezas: String(trabajo.costo_piezas || ""),
       venta_piezas: String(trabajo.venta_piezas || ""),
       mano_obra: String(trabajo.mano_obra || ""),
+      metodo_pago: trabajo.metodo_pago || "",
+      pago_recibido: Boolean(trabajo.pago_recibido),
       notas: trabajo.notas || ""
     });
 
@@ -1102,6 +1120,9 @@ export default function ControlTrabajosMecanicos() {
       costo_piezas: totalesTrabajo.costoPiezas,
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
+      metodo_pago: editForm.metodo_pago || null,
+      pago_recibido: Boolean(editForm.pago_recibido || editForm.metodo_pago),
+      fecha_pago: (editForm.pago_recibido || editForm.metodo_pago) ? (trabajoEditando.fecha_pago || new Date().toISOString()) : null,
       notas: editForm.notas.trim() || null
     };
 
@@ -1148,7 +1169,24 @@ export default function ControlTrabajosMecanicos() {
       return;
     }
 
-    const confirmar = confirm(`¿Finalizar completamente el trabajo de ${trabajo.mecanico_nombre}?`);
+    const metodoActual = trabajo.metodo_pago || "";
+    const metodoTexto = prompt(
+      "Método de pago usado por el cliente:\n\nOpciones: Cash, Zelle, Debit Card, Credit Card, Cash App, Apple Pay, Check, Financiamiento, Otro o Pendiente.",
+      metodoActual || "Cash"
+    );
+
+    if (metodoTexto === null) return;
+
+    const metodoPago = String(metodoTexto || "").trim();
+
+    if (!metodoPago) {
+      alert("Selecciona o escribe el método de pago antes de finalizar el trabajo.");
+      return;
+    }
+
+    const confirmar = confirm(
+      `¿Finalizar completamente el trabajo de ${trabajo.mecanico_nombre}?\n\nMétodo de pago: ${metodoPago}`
+    );
     if (!confirmar) return;
 
     const fin = new Date().toISOString();
@@ -1170,6 +1208,9 @@ export default function ControlTrabajosMecanicos() {
       costo_piezas: totalesTrabajo.costoPiezas,
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
+      metodo_pago: metodoPago,
+      pago_recibido: metodoPago !== "Pendiente",
+      fecha_pago: metodoPago !== "Pendiente" ? (trabajo.fecha_pago || fin) : null,
     };
 
     if (trabajo.diagnostico_inicio && !trabajo.diagnostico_fin && !trabajo.diagnostico_pausado) {
@@ -2654,6 +2695,34 @@ export default function ControlTrabajosMecanicos() {
           <input type="number" placeholder="Costo de piezas" value={editForm.costo_piezas} onChange={(e) => setEditForm({ ...editForm, costo_piezas: e.target.value })} style={inputStyle} />
           <input type="number" placeholder="Venta de piezas al cliente" value={editForm.venta_piezas} onChange={(e) => setEditForm({ ...editForm, venta_piezas: e.target.value })} style={inputStyle} />
           <input type="number" placeholder="Mano de obra cobrada" value={editForm.mano_obra} onChange={(e) => setEditForm({ ...editForm, mano_obra: e.target.value })} style={inputStyle} />
+          <label style={fieldLabel}>Método de pago</label>
+          <select
+            value={editForm.metodo_pago || ""}
+            onChange={(e) =>
+              setEditForm({
+                ...editForm,
+                metodo_pago: e.target.value,
+                pago_recibido: e.target.value && e.target.value !== "Pendiente"
+              })
+            }
+            style={inputStyle}
+          >
+            {metodosPago.map((metodo) => (
+              <option key={metodo.value || "sin-metodo"} value={metodo.value}>
+                {metodo.label}
+              </option>
+            ))}
+          </select>
+
+          <label style={{ ...fieldLabel, display: "flex", alignItems: "center", gap: "10px" }}>
+            <input
+              type="checkbox"
+              checked={Boolean(editForm.pago_recibido)}
+              onChange={(e) => setEditForm({ ...editForm, pago_recibido: e.target.checked })}
+            />
+            Pago recibido
+          </label>
+
           <textarea placeholder="Notas" value={editForm.notas} onChange={(e) => setEditForm({ ...editForm, notas: e.target.value })} style={{ ...inputStyle, minHeight: "80px" }} />
 
           <button onClick={guardarContabilidad} style={saveButton}>Guardar Cambios</button>
@@ -2977,6 +3046,9 @@ export default function ControlTrabajosMecanicos() {
               <p><strong>Cargo general 4%:</strong> {dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).cargoGeneral4)}</p>
               <p><strong>Ganancia piezas:</strong> {dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).gananciaPiezas)}</p>
               <p><strong>Total generado:</strong> <span style={statusBadge}>{dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).totalGenerado)}</span></p>
+              <p><strong>💳 Método de pago:</strong> {trabajo.metodo_pago || "No registrado"}</p>
+              <p><strong>✅ Pago recibido:</strong> {trabajo.pago_recibido ? "Sí" : "No"}</p>
+              <p><strong>🕒 Fecha de pago:</strong> {formatearFecha(trabajo.fecha_pago)}</p>
 
               <p><strong>Notas:</strong><br />{trabajo.notas || "Sin notas"}</p>
 

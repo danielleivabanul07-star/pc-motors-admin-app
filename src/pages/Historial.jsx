@@ -210,6 +210,7 @@ function Historial() {
         trabajo.mecanico_nombre,
         trabajo.trabajo,
         trabajo.resultado_diagnostico,
+        trabajo.metodo_pago,
         trabajo.orden_id,
         trabajo.id,
         ...piezas.map((pieza) => pieza.nombre),
@@ -367,6 +368,9 @@ function Historial() {
                   <p><strong>Factura:</strong> {trabajo.numero_factura || "No registrada"}</p>
                   <p><strong>Factura creada:</strong> {formatearFecha(trabajo.factura_creada_en)}</p>
                   <p><strong>Finalizado:</strong> {formatearFecha(trabajo.hora_fin)}</p>
+                  <p><strong>💳 Método de pago:</strong> {trabajo.metodo_pago || "No registrado"}</p>
+                  <p><strong>✅ Pago recibido:</strong> {trabajo.pago_recibido ? "Sí" : "No"}</p>
+                  <p><strong>🕒 Fecha de pago:</strong> {formatearFecha(trabajo.fecha_pago)}</p>
 
                   <div style={moneyGrid}>
                     <MoneyItem label="Compra piezas" value={totales.costoPiezas} />
