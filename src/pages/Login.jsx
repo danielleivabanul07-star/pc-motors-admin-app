@@ -7,6 +7,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
+  const [logoActual, setLogoActual] = useState(logoPC);
 
   const iniciarSesion = async (e) => {
     e.preventDefault();
@@ -36,7 +37,18 @@ function Login() {
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
-        <img src={logoPC} alt="PC MOTORS" style={logoStyle} />
+        <div style={logoBoxStyle}>
+          <img
+            src={logoActual}
+            alt="PC MOTORS"
+            style={logoStyle}
+            onError={() => {
+              if (logoActual !== "/logo-pc-motors.png.png") {
+                setLogoActual("/logo-pc-motors.png.png");
+              }
+            }}
+          />
+        </div>
 
         <h1 style={titleStyle}>PC MOTORS</h1>
         <p style={subtitleStyle}>Acceso seguro al panel administrativo</p>
@@ -69,9 +81,7 @@ function Login() {
           </button>
         </form>
 
-        <p style={smallText}>
-          Solo personal autorizado de PC Motors.
-        </p>
+        <p style={smallText}>Solo personal autorizado de PC Motors.</p>
       </div>
     </div>
   );
@@ -85,7 +95,8 @@ const pageStyle = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "20px"
+  padding: "14px",
+  overflowX: "hidden"
 };
 
 const cardStyle = {
@@ -94,14 +105,27 @@ const cardStyle = {
   background: "rgba(31, 41, 55, 0.96)",
   border: "1px solid #f59e0b",
   borderRadius: "18px",
-  padding: "30px",
+  padding: "clamp(20px, 6vw, 30px)",
   boxShadow: "0 20px 50px rgba(0,0,0,0.45)"
 };
 
-const logoStyle = {
-  width: "130px",
-  display: "block",
+const logoBoxStyle = {
+  width: "118px",
+  height: "118px",
   margin: "0 auto 18px auto",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#020617",
+  borderRadius: "14px",
+  overflow: "hidden"
+};
+
+const logoStyle = {
+  width: "100%",
+  height: "100%",
+  display: "block",
+  objectFit: "contain",
   borderRadius: "14px"
 };
 
@@ -109,13 +133,15 @@ const titleStyle = {
   color: "#f59e0b",
   textAlign: "center",
   margin: "0 0 8px 0",
-  fontSize: "34px"
+  fontSize: "clamp(30px, 9vw, 34px)",
+  lineHeight: 1.05
 };
 
 const subtitleStyle = {
   color: "#d1d5db",
   textAlign: "center",
-  marginBottom: "25px"
+  marginBottom: "25px",
+  fontSize: "clamp(14px, 4vw, 16px)"
 };
 
 const labelStyle = {
@@ -133,7 +159,7 @@ const inputStyle = {
   border: "1px solid #374151",
   background: "#111827",
   color: "white",
-  fontSize: "15px",
+  fontSize: "16px",
   boxSizing: "border-box"
 };
 

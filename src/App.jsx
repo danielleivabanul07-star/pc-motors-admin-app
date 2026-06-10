@@ -20,10 +20,19 @@ function App() {
   const [page, setPage] = useState("dashboard");
   const [session, setSession] = useState(null);
   const [cargandoAuth, setCargandoAuth] = useState(true);
+  const [esMovil, setEsMovil] = useState(() => window.innerWidth <= 768);
 
   const path = window.location.pathname;
   const esFirmaEstimado = path.startsWith("/firma-estimado/");
   const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
+
+  useEffect(() => {
+    const detectarTamano = () => setEsMovil(window.innerWidth <= 768);
+    detectarTamano();
+
+    window.addEventListener("resize", detectarTamano);
+    return () => window.removeEventListener("resize", detectarTamano);
+  }, []);
 
   useEffect(() => {
     let activo = true;
@@ -64,7 +73,14 @@ function App() {
     return (
       <div style={loadingStyle}>
         <div style={loadingBox}>
-          <img src={logoPC} alt="PC MOTORS" style={loadingLogo} />
+          <img
+            src={logoPC}
+            alt="PC MOTORS"
+            style={loadingLogo}
+            onError={(e) => {
+              e.currentTarget.src = "/logo-pc-motors.png.png";
+            }}
+          />
           <h2>Cargando PC Motors...</h2>
         </div>
       </div>
@@ -77,19 +93,41 @@ function App() {
 
   return (
     <div
+      className="app-shell"
       style={{
         ...appStyle,
-        backgroundImage: `linear-gradient(rgba(17,24,39,0.65), rgba(17,24,39,0.45)), url(${logoPC})`,
-        backgroundSize: "1350px",
+        flexDirection: esMovil ? "column" : "row",
+        backgroundImage: esMovil
+          ? "linear-gradient(rgba(17,24,39,0.93), rgba(17,24,39,0.92))"
+          : `linear-gradient(rgba(17,24,39,0.65), rgba(17,24,39,0.45)), url(${logoPC})`,
+        backgroundSize: esMovil ? "auto" : "1350px",
         backgroundRepeat: "no-repeat",
         backgroundPosition: "center",
-        backgroundAttachment: "fixed"
+        backgroundAttachment: esMovil ? "scroll" : "fixed"
       }}
     >
-      <Sidebar page={page} setPage={setPage} />
+      <div className="sidebar-mobile-wrap">
+        <Sidebar page={page} setPage={setPage} />
+      </div>
 
-      <main style={mainStyle}>
-        <div style={topBarStyle}>
+      <main
+        className="app-main"
+        style={{
+          ...mainStyle,
+          padding: esMovil ? "12px" : "30px",
+          width: esMovil ? "100%" : "auto",
+          maxWidth: esMovil ? "100vw" : "none"
+        }}
+      >
+        <div
+          className="top-session-bar"
+          style={{
+            ...topBarStyle,
+            flexDirection: esMovil ? "column" : "row",
+            alignItems: esMovil ? "stretch" : "center",
+            fontSize: esMovil ? "13px" : "15px"
+          }}
+        >
           <div>
             <strong>Sesión activa:</strong>{" "}
             <span style={{ color: "#f59e0b" }}>
@@ -122,12 +160,14 @@ const appStyle = {
   display: "flex",
   minHeight: "100vh",
   color: "white",
-  fontFamily: "Arial"
+  fontFamily: "Arial",
+  overflowX: "hidden"
 };
 
 const mainStyle = {
   flex: 1,
-  padding: "30px"
+  padding: "30px",
+  overflowX: "hidden"
 };
 
 const topBarStyle = {
@@ -159,7 +199,8 @@ const loadingStyle = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontFamily: "Arial"
+  fontFamily: "Arial",
+  padding: "20px"
 };
 
 const loadingBox = {
@@ -167,11 +208,15 @@ const loadingBox = {
   background: "#111827",
   border: "1px solid #f59e0b",
   borderRadius: "16px",
-  padding: "30px"
+  padding: "25px",
+  width: "100%",
+  maxWidth: "360px"
 };
 
 const loadingLogo = {
-  width: "130px",
+  width: "110px",
+  height: "110px",
+  objectFit: "contain",
   borderRadius: "14px",
   marginBottom: "15px"
 };
