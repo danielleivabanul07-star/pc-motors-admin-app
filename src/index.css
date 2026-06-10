@@ -12,9 +12,7 @@ body,
   background: #111827;
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
-}
+
 
 body {
   overflow-x: hidden;
