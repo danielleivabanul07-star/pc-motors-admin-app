@@ -94,6 +94,15 @@ export default function ControlTrabajosMecanicos() {
   ];
 
   const GOOGLE_REVIEW_URL = "https://g.page/r/CZDnoTatR0yOEAI/review";
+  const APP_PUBLIC_URL = "https://pc-motors-admin-app.vercel.app";
+
+  const obtenerBasePublicaApp = () => {
+    const origenActual = window.location.origin;
+    if (origenActual.includes("localhost") || origenActual.includes("127.0.0.1")) {
+      return APP_PUBLIC_URL;
+    }
+    return origenActual;
+  };
 
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
 
@@ -2153,6 +2162,58 @@ export default function ControlTrabajosMecanicos() {
     await cargarDatos();
   };
 
+  const generarTokenEstimado = () => {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  };
+
+  const obtenerOCrearTokenEstimado = async (trabajo) => {
+    if (!trabajo?.id) return null;
+    if (trabajo.estimado_token) return trabajo.estimado_token;
+
+    const token = generarTokenEstimado();
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({ estimado_token: token })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert("No se pudo crear el token de firma del estimado. Revisa que la columna estimado_token exista en trabajos_mecanicos.");
+      return null;
+    }
+
+    return token;
+  };
+
+  const obtenerLinkFirmaEstimado = async (trabajo) => {
+    if (!trabajo) return null;
+
+    const token = await obtenerOCrearTokenEstimado(trabajo);
+    if (!token) return null;
+
+    return `${obtenerBasePublicaApp()}/firma-estimado/${token}`;
+  };
+
+  const copiarLinkFirmaEstimado = async (trabajo) => {
+    const linkFirma = await obtenerLinkFirmaEstimado(trabajo);
+
+    if (!linkFirma) {
+      alert("No se pudo crear el link de firma del estimado.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(linkFirma);
+      alert(`Link de firma copiado:\n\n${linkFirma}`);
+    } catch {
+      prompt("Copia este link de firma:", linkFirma);
+    }
+
+    await cargarDatos();
+  };
+
   const enviarEstimadoSMS = async (trabajo) => {
     if (!trabajo) return;
 
@@ -2160,6 +2221,18 @@ export default function ControlTrabajosMecanicos() {
 
     if (!estimadoUrlNuevo) {
       alert("No se pudo generar el PDF actualizado del estimado para enviarlo por SMS.");
+      return;
+    }
+
+    const trabajoParaFirma = {
+      ...trabajo,
+      estimado_pdf_url: estimadoUrlNuevo
+    };
+
+    const linkFirma = await obtenerLinkFirmaEstimado(trabajoParaFirma);
+
+    if (!linkFirma) {
+      alert("No se pudo crear el link para que el cliente firme el estimado.");
       return;
     }
 
@@ -2174,11 +2247,13 @@ export default function ControlTrabajosMecanicos() {
       return;
     }
 
-    const estimadoUrl = `${estimadoUrlNuevo}${estimadoUrlNuevo.includes("?") ? "&" : "?"}v=${Date.now()}`;
+    const linkFirmaConCache = `${linkFirma}${linkFirma.includes("?") ? "&" : "?"}v=${Date.now()}`;
 
-    const mensaje = `Hola ${trabajo.cliente_nombre || "cliente"}, gracias por confiar en PC Motors.\n\nAquí está su estimado de servicio actualizado:\n${estimadoUrl}\n\nCuando lo revise, puede confirmarnos si aprueba el trabajo.\n\nPC Motors Auto Repair`;
+    const mensaje = `Hola ${trabajo.cliente_nombre || "cliente"}, gracias por confiar en PC Motors.\n\nRevise su estimado aquí y fírmelo desde su teléfono para aprobar el trabajo:\n${linkFirmaConCache}\n\nPC Motors Auto Repair`;
     const separador = navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad") ? "&" : "?";
     window.location.href = `sms:${telefonoSMS}${separador}body=${encodeURIComponent(mensaje)}`;
+
+    await cargarDatos();
   };
 
   const normalizarTelefonoParaSMS = (telefono) => {
@@ -2842,7 +2917,8 @@ export default function ControlTrabajosMecanicos() {
                   <>
                     <button onClick={() => crearEditarEstimado(trabajo)} style={estimateButton}>📋 Abrir Editor de Estimado</button>
                     <button onClick={() => crearPDFEstimado(trabajo, true)} style={invoiceButton}>📄 Generar PDF Estimado</button>
-                    <button onClick={() => enviarEstimadoSMS(trabajo)} style={smsButton}>📱 Enviar Estimado por SMS</button>
+                    <button onClick={() => enviarEstimadoSMS(trabajo)} style={smsButton}>📱 Enviar Estimado para Firma</button>
+                    <button onClick={() => copiarLinkFirmaEstimado(trabajo)} style={invoiceButton}>🔗 Copiar Link de Firma</button>
                     <button onClick={() => aprobarEstimado(trabajo)} style={reviewButton}>✅ Aprobar Estimado</button>
                     <button onClick={() => rechazarEstimado(trabajo)} style={deleteButton}>❌ Rechazar Estimado</button>
                     <button onClick={() => marcarPiezasOrdenadas(trabajo)} style={partsButton}>🚚 Piezas Ordenadas</button>
@@ -2857,6 +2933,38 @@ export default function ControlTrabajosMecanicos() {
                       Abrir estimado del cliente
                     </a>
                   </p>
+                )}
+
+                {trabajo.estimado_token && !trabajo.estimado_aprobado_cliente && (
+                  <p style={{ marginTop: "8px", color: "#93c5fd" }}>
+                    <strong>Link de firma:</strong>{" "}
+                    <a
+                      href={`${obtenerBasePublicaApp()}/firma-estimado/${trabajo.estimado_token}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={invoiceLink}
+                    >
+                      Abrir página de firma del cliente
+                    </a>
+                  </p>
+                )}
+
+                {trabajo.estimado_aprobado_cliente && (
+                  <div style={signedBox}>
+                    <strong>🟢 Estimado aprobado y firmado por el cliente</strong>
+                    <br />
+                    <span>Nombre: {trabajo.estimado_firmado_nombre || "Cliente"}</span>
+                    <br />
+                    <span>Fecha: {formatearFecha(trabajo.estimado_firmado_en)}</span>
+                    {trabajo.estimado_firma_url && (
+                      <>
+                        <br />
+                        <a href={trabajo.estimado_firma_url} target="_blank" rel="noreferrer" style={invoiceLink}>
+                          Ver firma
+                        </a>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2958,6 +3066,15 @@ const pausedBadge = { background: "#ca8a04", color: "#111827", padding: "4px 8px
 const invoiceBox = { background: "#111827", padding: "12px", borderRadius: "10px", border: "1px solid #374151", marginTop: "15px" };
 const invoiceItem = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "8px" };
 const invoiceLink = { display: "block", color: "#93c5fd", textDecoration: "none" };
+const signedBox = {
+  background: "rgba(22, 163, 74, 0.16)",
+  border: "1px solid #22c55e",
+  color: "white",
+  padding: "12px",
+  borderRadius: "10px",
+  marginTop: "12px",
+  lineHeight: 1.6
+};
 const deleteMiniButton = { padding: "6px 10px", background: "#991b1b", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" };
 const searchInputStyle = { width: "100%", padding: "12px", marginBottom: "20px", borderRadius: "8px", border: "1px solid #f59e0b", background: "#111827", color: "white", boxSizing: "border-box", fontWeight: "bold" };
 const emptyStyle = { background: "#1f2937", padding: "20px", borderRadius: "12px" };
