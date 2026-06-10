@@ -23,8 +23,13 @@ function App() {
   const [esMovil, setEsMovil] = useState(() => window.innerWidth <= 768);
 
   const path = window.location.pathname;
+
   const esFirmaEstimado = path.startsWith("/firma-estimado/");
-  const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
+  const tokenFirma = esFirmaEstimado
+    ? path.replace("/firma-estimado/", "")
+    : "";
+
+  const esRegistroPublico = path === "/registro-publico";
 
   useEffect(() => {
     const detectarTamano = () => setEsMovil(window.innerWidth <= 768);
@@ -67,6 +72,10 @@ function App() {
 
   if (esFirmaEstimado) {
     return <FirmaEstimadoCliente token={tokenFirma} />;
+  }
+
+  if (esRegistroPublico) {
+    return <RegistroCliente />;
   }
 
   if (cargandoAuth) {
