@@ -73,8 +73,7 @@ function Dashboard() {
     impuestos: 0,
     descuentos: 0,
     totalCobrado: 0,
-    gananciaAprox: 0,
-    porMetodoPago: {}
+    gananciaAprox: 0
   });
 
   const calcularTotalesClientes = (clientes) => {
@@ -115,10 +114,6 @@ function Dashboard() {
       total.impuestos += taxPiezas6 + cargoGeneral4;
       total.totalCobrado += totalGenerado;
       total.gananciaAprox += totalGenerado - inversionPiezas;
-
-      const metodoPago = trabajo.metodo_pago || "No registrado";
-      total.porMetodoPago[metodoPago] = Number(total.porMetodoPago[metodoPago] || 0) + totalGenerado;
-
       return total;
     }, totalesVacios());
   };
@@ -133,16 +128,7 @@ function Dashboard() {
     impuestos: Number(a.impuestos || 0) + Number(b.impuestos || 0),
     descuentos: Number(a.descuentos || 0) + Number(b.descuentos || 0),
     totalCobrado: Number(a.totalCobrado || 0) + Number(b.totalCobrado || 0),
-    gananciaAprox: Number(a.gananciaAprox || 0) + Number(b.gananciaAprox || 0),
-    porMetodoPago: {
-      ...(a.porMetodoPago || {}),
-      ...Object.fromEntries(
-        Object.entries(b.porMetodoPago || {}).map(([metodo, valor]) => [
-          metodo,
-          Number(a.porMetodoPago?.[metodo] || 0) + Number(valor || 0)
-        ])
-      )
-    }
+    gananciaAprox: Number(a.gananciaAprox || 0) + Number(b.gananciaAprox || 0)
   });
 
   const fechaTrabajoMecanico = (trabajo) => {
@@ -254,11 +240,19 @@ function Dashboard() {
       (trabajo) => trabajo.estado !== "finalizado" && !trabajo.hora_fin
     );
 
-    // Trabajos finalizados: son los únicos que cuentan dinero en el Dashboard.
-    // Así no se muestran ingresos, ganancias ni mano de obra de trabajos aún abiertos.
-    const trabajosMecanicosFinalizados = trabajosMecanicos.filter(
-      (trabajo) => trabajo.estado === "finalizado" || Boolean(trabajo.hora_fin)
-    );
+    // Trabajos cobrados: son los únicos que cuentan dinero en el Dashboard.
+    // No se muestran ingresos, ganancias, taxes ni mano de obra de trabajos abiertos
+    // ni de trabajos finalizados que todavía estén pendientes de pago.
+    const trabajosMecanicosFinalizados = trabajosMecanicos.filter((trabajo) => {
+      const finalizado = trabajo.estado === "finalizado";
+      const pagoRecibido = trabajo.pago_recibido === true;
+      const metodoPagoValido =
+        trabajo.metodo_pago &&
+        trabajo.metodo_pago !== "Pendiente" &&
+        trabajo.metodo_pago !== "No registrado";
+
+      return finalizado && pagoRecibido && metodoPagoValido;
+    });
 
     if (errorTrabajosMecanicos) {
       console.log(errorTrabajosMecanicos);
@@ -380,7 +374,7 @@ function Dashboard() {
   return (
     <div style={pageBox}>
       <h1 style={titleStyle}>📊 Dashboard Financiero</h1>
-      <p style={subtitleStyle}>Resumen de clientes activos, trabajos atendidos, trabajos mecánicos, ganancias y cobros.</p>
+      <p style={subtitleStyle}>Resumen de clientes activos, trabajos atendidos, trabajos mecánicos y dinero realmente cobrado.</p>
 
       <div style={actionsBox}>
         <button onClick={() => guardarReporte("semanal")} style={saveButton}>💾 Guardar Reporte Semanal</button>
@@ -415,17 +409,6 @@ function Dashboard() {
         <Card title="✅ Ganancia aprox." value={dinero(stats.semana.gananciaAprox)} />
       </div>
 
-      <h2 style={sectionTitle}>💳 Cobros por método esta semana</h2>
-      <div style={gridStyle}>
-        {Object.entries(stats.semana.porMetodoPago || {}).length === 0 ? (
-          <Card title="Sin cobros registrados" value="$0.00" />
-        ) : (
-          Object.entries(stats.semana.porMetodoPago || {}).map(([metodo, total]) => (
-            <Card key={metodo} title={`💳 ${metodo}`} value={dinero(total)} />
-          ))
-        )}
-      </div>
-
       <h2 style={sectionTitle}>🗓 Resumen de este mes</h2>
       <div style={gridStyle}>
         <Card title="🧾 Inversión piezas" value={dinero(stats.mes.inversionPiezas)} />
@@ -436,17 +419,6 @@ function Dashboard() {
         <Card title="🔧 Mano de obra" value={dinero(stats.mes.manoObra)} />
         <Card title="💲 Total cobrado" value={dinero(stats.mes.totalCobrado)} />
         <Card title="✅ Ganancia aprox." value={dinero(stats.mes.gananciaAprox)} />
-      </div>
-
-      <h2 style={sectionTitle}>💳 Cobros por método este mes</h2>
-      <div style={gridStyle}>
-        {Object.entries(stats.mes.porMetodoPago || {}).length === 0 ? (
-          <Card title="Sin cobros registrados" value="$0.00" />
-        ) : (
-          Object.entries(stats.mes.porMetodoPago || {}).map(([metodo, total]) => (
-            <Card key={metodo} title={`💳 ${metodo}`} value={dinero(total)} />
-          ))
-        )}
       </div>
 
       <h2 style={sectionTitle}>🔎 Trabajos de esta semana</h2>
@@ -461,7 +433,6 @@ function Dashboard() {
               <strong>{trabajo.numero_factura || "Trabajo mecánico"}</strong>
               <span>{trabajo.cliente_nombre || "Cliente manual"}</span>
               <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{trabajo.metodo_pago || "No registrado"}</span>
               <span>{dinero(trabajo.costo_piezas)} inversión</span>
               <span>{dinero(Number(trabajo.venta_piezas || 0) * 0.06)} tax piezas 6%</span>
               <span>{dinero((Number(trabajo.venta_piezas || 0) + Number(trabajo.mano_obra || 0) + Number(trabajo.venta_piezas || 0) * 0.06) * 0.04)} cargo 4%</span>
@@ -497,7 +468,7 @@ const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borde
 const cardTitleStyle = { color: "white", fontSize: "20px", margin: 0, marginBottom: "10px" };
 const numberStyle = { fontSize: "30px", fontWeight: "bold", color: "#f59e0b", margin: 0 };
 const tableBox = { background: "rgba(31, 41, 55, 0.95)", borderRadius: "12px", border: "1px solid #374151", overflow: "hidden" };
-const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
 const emptyStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #374151", color: "white" };
 
 export default Dashboard;
