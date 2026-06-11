@@ -176,6 +176,20 @@ export default function ControlTrabajosMecanicos() {
 
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
 
+  const calcularPrecioPromedioPieza = (costoRealValor, precioNormalValor) => {
+    const costoReal = Number(costoRealValor || 0);
+    const precioNormal = Number(precioNormalValor || 0);
+
+    if (costoReal > 0 && precioNormal > 0) {
+      return redondearDinero((costoReal + precioNormal) / 2);
+    }
+
+    if (costoReal > 0) return redondearDinero(costoReal);
+    if (precioNormal > 0) return redondearDinero(precioNormal);
+
+    return 0;
+  };
+
   const calcularTotalesContabilidad = (costoPiezasValor, ventaPiezasValor, manoObraValor) => {
     const costoPiezas = Number(costoPiezasValor || 0);
     const ventaPiezas = Number(ventaPiezasValor || 0);
@@ -211,26 +225,54 @@ export default function ControlTrabajosMecanicos() {
     }
   };
 
-  const normalizarPiezaEstimado = (pieza, index = 0) => ({
-    id: pieza.id || `${Date.now()}-${index}`,
-    nombre: String(pieza.nombre || pieza.name || `Pieza ${index + 1}`),
-    cantidad: Number(pieza.cantidad || pieza.qty || 1),
-    costo: Number(pieza.costo || pieza.costo_interno || 0),
-    venta: Number(
+  const normalizarPiezaEstimado = (pieza, index = 0) => {
+    const costoReal = Number(
+      pieza.costo_real ??
+      pieza.costo ??
+      pieza.costo_interno ??
+      0
+    );
+
+    const precioNormal = Number(
+      pieza.precio_normal ??
+      pieza.precio_regular ??
+      pieza.precio_comercial ??
+      pieza.precio_lista ??
+      0
+    );
+
+    const precioSugerido = redondearDinero(
+      Number(
+        pieza.precio_sugerido ??
+        pieza.precio_promedio ??
+        calcularPrecioPromedioPieza(costoReal, precioNormal)
+      )
+    );
+
+    const precioCliente = Number(
       pieza.venta ??
       pieza.precio_venta ??
       pieza.precio_cliente ??
       pieza.precio ??
+      precioSugerido ??
       0
-    ),
-    precio_venta: Number(
-      pieza.venta ??
-      pieza.precio_venta ??
-      pieza.precio_cliente ??
-      pieza.precio ??
-      0
-    )
-  });
+    );
+
+    return {
+      id: pieza.id || `${Date.now()}-${index}`,
+      nombre: String(pieza.nombre || pieza.name || `Pieza ${index + 1}`),
+      cantidad: Number(pieza.cantidad || pieza.qty || 1),
+      costo: costoReal,
+      costo_real: costoReal,
+      precio_normal: precioNormal,
+      precio_sugerido: precioSugerido,
+      precio_promedio: precioSugerido,
+      venta: precioCliente,
+      precio_venta: precioCliente,
+      precio_cliente: precioCliente,
+      precio_cliente_manual: Boolean(pieza.precio_cliente_manual)
+    };
+  };
 
   const parsearEstimadoServicios = (valor) => {
     if (Array.isArray(valor)) return valor;
@@ -1790,7 +1832,11 @@ export default function ControlTrabajosMecanicos() {
               nombre: "",
               cantidad: 1,
               costo: 0,
-              venta: 0
+              costo_real: 0,
+              precio_normal: 0,
+              precio_sugerido: 0,
+              venta: 0,
+              precio_cliente_manual: false
             }
           ],
       servicios: serviciosActuales,
@@ -1825,16 +1871,58 @@ export default function ControlTrabajosMecanicos() {
           ...piezaActual,
           nombre: valor
         };
-      } else if (campo === "venta" || campo === "precio_venta" || campo === "precio_cliente") {
+      } else if (
+        campo === "venta" ||
+        campo === "precio_venta" ||
+        campo === "precio_cliente"
+      ) {
         const precioCliente = Number(valor || 0);
         piezas[index] = {
           ...piezaActual,
           cantidad: 1,
-          costo: Number(piezaActual.costo || 0),
+          costo: Number(piezaActual.costo || piezaActual.costo_real || 0),
+          costo_real: Number(piezaActual.costo_real || piezaActual.costo || 0),
+          precio_normal: Number(piezaActual.precio_normal || 0),
           venta: precioCliente,
           precio_venta: precioCliente,
-          precio_cliente: precioCliente
+          precio_cliente: precioCliente,
+          precio_cliente_manual: true
         };
+      } else if (campo === "costo" || campo === "costo_real" || campo === "precio_normal") {
+        const nuevoValor = Number(valor || 0);
+        const costoReal = campo === "precio_normal"
+          ? Number(piezaActual.costo_real ?? piezaActual.costo ?? 0)
+          : nuevoValor;
+        const precioNormal = campo === "precio_normal"
+          ? nuevoValor
+          : Number(piezaActual.precio_normal || 0);
+        const precioSugerido = calcularPrecioPromedioPieza(costoReal, precioNormal);
+        const precioClienteActual = Number(
+          piezaActual.venta ??
+          piezaActual.precio_venta ??
+          piezaActual.precio_cliente ??
+          0
+        );
+        const debeActualizarPrecioCliente =
+          !piezaActual.precio_cliente_manual || precioClienteActual <= 0;
+
+        const piezaActualizada = {
+          ...piezaActual,
+          cantidad: 1,
+          costo: costoReal,
+          costo_real: costoReal,
+          precio_normal: precioNormal,
+          precio_sugerido: precioSugerido,
+          precio_promedio: precioSugerido
+        };
+
+        if (debeActualizarPrecioCliente) {
+          piezaActualizada.venta = precioSugerido;
+          piezaActualizada.precio_venta = precioSugerido;
+          piezaActualizada.precio_cliente = precioSugerido;
+        }
+
+        piezas[index] = piezaActualizada;
       } else {
         piezas[index] = {
           ...piezaActual,
@@ -1856,7 +1944,11 @@ export default function ControlTrabajosMecanicos() {
           nombre: "",
           cantidad: 1,
           costo: 0,
-          venta: 0
+          costo_real: 0,
+          precio_normal: 0,
+          precio_sugerido: 0,
+          venta: 0,
+          precio_cliente_manual: false
         }
       ]
     }));
@@ -1951,11 +2043,15 @@ export default function ControlTrabajosMecanicos() {
 
     const piezas = (estimadoDraft.piezas || [])
       .map((pieza, index) => {
+        const costoReal = Number(pieza.costo_real ?? pieza.costo ?? 0);
+        const precioNormal = Number(pieza.precio_normal ?? 0);
+        const precioSugerido = calcularPrecioPromedioPieza(costoReal, precioNormal);
         const precioCliente = Number(
           pieza.venta ??
           pieza.precio_venta ??
           pieza.precio_cliente ??
           pieza.precio ??
+          precioSugerido ??
           0
         );
 
@@ -1963,16 +2059,22 @@ export default function ControlTrabajosMecanicos() {
           id: pieza.id || `${Date.now()}-${index}`,
           nombre: String(pieza.nombre || `Pieza ${index + 1}`).trim(),
           cantidad: 1,
-          costo: Number(pieza.costo || 0),
+          costo: costoReal,
+          costo_real: costoReal,
+          precio_normal: precioNormal,
+          precio_sugerido: precioSugerido,
+          precio_promedio: precioSugerido,
           venta: precioCliente,
           precio_venta: precioCliente,
-          precio_cliente: precioCliente
+          precio_cliente: precioCliente,
+          precio_cliente_manual: Boolean(pieza.precio_cliente_manual)
         };
       })
       .filter((pieza) => {
         return (
           String(pieza.nombre || "").trim() ||
           Number(pieza.costo || 0) > 0 ||
+          Number(pieza.precio_normal || 0) > 0 ||
           Number(pieza.venta || 0) > 0
         );
       });
@@ -3085,24 +3187,62 @@ export default function ControlTrabajosMecanicos() {
                     )}
 
                     <label style={fieldLabel}>Piezas del estimado</label>
-                    {(estimadoDraft.piezas || []).map((pieza, index) => (
-                      <div key={pieza.id || index} style={pieceEditorRow}>
-                        <input
-                          placeholder="Nombre de pieza"
-                          value={pieza.nombre}
-                          onChange={(e) => actualizarPiezaDraft(index, "nombre", e.target.value)}
-                          style={pieceInput}
-                        />
-                        <input
-                          type="number"
-                          placeholder="Precio de la pieza para el cliente"
-                          value={pieza.venta ?? pieza.precio_venta ?? pieza.precio_cliente ?? ""}
-                          onChange={(e) => actualizarPiezaDraft(index, "venta", e.target.value)}
-                          style={piecePriceInput}
-                        />
-                        <button onClick={() => eliminarPiezaDraft(index)} style={miniDeleteButton}>🗑</button>
-                      </div>
-                    ))}
+                    {(estimadoDraft.piezas || []).map((pieza, index) => {
+                      const costoReal = Number(pieza.costo_real ?? pieza.costo ?? 0);
+                      const precioNormal = Number(pieza.precio_normal ?? 0);
+                      const precioSugerido = calcularPrecioPromedioPieza(costoReal, precioNormal);
+                      const precioCliente = Number(
+                        pieza.venta ??
+                        pieza.precio_venta ??
+                        pieza.precio_cliente ??
+                        precioSugerido ??
+                        0
+                      );
+                      const taxPieza = redondearDinero(precioCliente * 0.06);
+
+                      return (
+                        <div key={pieza.id || index} style={pieceEditorRow}>
+                          <input
+                            placeholder="Nombre de pieza"
+                            value={pieza.nombre}
+                            onChange={(e) => actualizarPiezaDraft(index, "nombre", e.target.value)}
+                            style={pieceInput}
+                          />
+
+                          <input
+                            type="number"
+                            placeholder="Costo real PC Motors"
+                            value={pieza.costo_real ?? pieza.costo ?? ""}
+                            onChange={(e) => actualizarPiezaDraft(index, "costo_real", e.target.value)}
+                            style={piecePriceInput}
+                          />
+
+                          <input
+                            type="number"
+                            placeholder="Precio normal pieza"
+                            value={pieza.precio_normal ?? ""}
+                            onChange={(e) => actualizarPiezaDraft(index, "precio_normal", e.target.value)}
+                            style={piecePriceInput}
+                          />
+
+                          <div style={suggestedPriceBox}>
+                            <strong>Promedio:</strong> {dinero(precioSugerido)}
+                            <br />
+                            <span>Tax 6%: {dinero(taxPieza)}</span>
+                          </div>
+
+                          <input
+                            type="number"
+                            placeholder="Precio cliente editable"
+                            value={pieza.venta ?? pieza.precio_venta ?? pieza.precio_cliente ?? ""}
+                            onChange={(e) => actualizarPiezaDraft(index, "venta", e.target.value)}
+                            style={piecePriceInput}
+                          />
+
+                          <button onClick={() => eliminarPiezaDraft(index)} style={miniDeleteButton}>🗑</button>
+                        </div>
+                      );
+                    })}
 
                     <button onClick={agregarPiezaDraft} style={partsButton}>➕ Agregar pieza</button>
 
@@ -3352,10 +3492,20 @@ const internalHint = {
 
 const pieceEditorRow = {
   display: "grid",
-  gridTemplateColumns: "1.4fr 1fr auto",
+  gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr auto",
   gap: "8px",
   marginBottom: "8px",
   alignItems: "center"
+};
+
+const suggestedPriceBox = {
+  background: "#0f172a",
+  border: "1px solid #374151",
+  borderRadius: "8px",
+  padding: "8px",
+  color: "#f59e0b",
+  fontSize: "13px",
+  lineHeight: "1.35"
 };
 
 const pieceInput = {
