@@ -2,6 +2,56 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../services/supabase";
 import jsPDF from "jspdf";
 
+
+const paymentSwitchBox = {
+  background: "#0f172a",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "12px",
+  marginBottom: "12px"
+};
+
+const paymentSwitchButtons = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: "10px",
+  marginTop: "12px"
+};
+
+const paidButton = {
+  padding: "12px",
+  background: "#1f2937",
+  color: "white",
+  border: "1px solid #374151",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const paidButtonActive = {
+  ...paidButton,
+  background: "#16a34a",
+  border: "1px solid #22c55e"
+};
+
+const pendingButton = {
+  padding: "12px",
+  background: "#1f2937",
+  color: "white",
+  border: "1px solid #374151",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const pendingButtonActive = {
+  ...pendingButton,
+  background: "#d97706",
+  border: "1px solid #f59e0b",
+  color: "#111827"
+};
+
+
 export default function ControlTrabajosMecanicos() {
   const [mecanicos, setMecanicos] = useState([]);
   const [trabajos, setTrabajos] = useState([]);
@@ -49,6 +99,8 @@ export default function ControlTrabajosMecanicos() {
     costo_piezas: "",
     venta_piezas: "",
     mano_obra: "",
+    metodo_pago: "",
+    pago_recibido: false,
     notas: ""
   };
 
@@ -1115,8 +1167,10 @@ export default function ControlTrabajosMecanicos() {
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
       metodo_pago: editForm.metodo_pago || null,
-      pago_recibido: Boolean(editForm.pago_recibido || editForm.metodo_pago),
-      fecha_pago: (editForm.pago_recibido || editForm.metodo_pago) ? (trabajoEditando.fecha_pago || new Date().toISOString()) : null,
+      pago_recibido: Boolean(editForm.pago_recibido),
+      fecha_pago: Boolean(editForm.pago_recibido)
+        ? (trabajoEditando.fecha_pago || new Date().toISOString())
+        : null,
       notas: editForm.notas.trim() || null
     };
 
@@ -1178,8 +1232,14 @@ export default function ControlTrabajosMecanicos() {
       return;
     }
 
+    const pagoRecibido = metodoPago === "Pendiente"
+      ? false
+      : confirm(
+          `¿El pago fue recibido realmente?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}\nMétodo: ${metodoPago}\n\nAceptar = Sí, pago recibido.\nCancelar = No, queda pendiente.`
+        );
+
     const confirmar = confirm(
-      `¿Finalizar completamente el trabajo de ${trabajo.mecanico_nombre}?\n\nMétodo de pago: ${metodoPago}`
+      `¿Finalizar completamente el trabajo de ${trabajo.mecanico_nombre}?\n\nMétodo de pago: ${metodoPago}\nPago recibido: ${pagoRecibido ? "Sí" : "No"}`
     );
     if (!confirmar) return;
 
@@ -1203,8 +1263,8 @@ export default function ControlTrabajosMecanicos() {
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
       metodo_pago: metodoPago,
-      pago_recibido: metodoPago !== "Pendiente",
-      fecha_pago: metodoPago !== "Pendiente" ? (trabajo.fecha_pago || fin) : null,
+      pago_recibido: pagoRecibido,
+      fecha_pago: pagoRecibido ? (trabajo.fecha_pago || fin) : null,
     };
 
     if (trabajo.diagnostico_inicio && !trabajo.diagnostico_fin && !trabajo.diagnostico_pausado) {
@@ -1380,17 +1440,25 @@ export default function ControlTrabajosMecanicos() {
   };
 
 
-  const subirFacturaClientePDF = async (trabajo, numeroFactura, doc) => {
+  const subirFacturaClientePDF = async (trabajo, numeroFactura, doc, totalFacturaActual = 0) => {
     const nombreSeguro = String(numeroFactura || `factura-${Date.now()}`)
       .replace(/[^a-zA-Z0-9-_]/g, "-");
-    const rutaPDF = `trabajo-${trabajo.id}/${nombreSeguro}.pdf`;
+
+    const totalSeguro = String(Number(totalFacturaActual || 0).toFixed(2)).replace(".", "-");
+    const versionUnica = Date.now();
+
+    // IMPORTANTE:
+    // Se usa una ruta única cada vez que se crea/actualiza la factura.
+    // Así evitamos que el SMS siga enviando un PDF viejo guardado en el mismo link.
+    const rutaPDF = `trabajo-${trabajo.id}/${nombreSeguro}-${totalSeguro}-${versionUnica}.pdf`;
     const pdfBlob = doc.output("blob");
 
     const { error: errorUpload } = await supabase.storage
       .from("facturas-clientes")
       .upload(rutaPDF, pdfBlob, {
         contentType: "application/pdf",
-        upsert: true
+        upsert: false,
+        cacheControl: "0"
       });
 
     if (errorUpload) {
@@ -1422,6 +1490,21 @@ export default function ControlTrabajosMecanicos() {
         factura_pdf_url: facturaUrl,
         factura_pdf_path: facturaPath,
         factura_sms_estado: "pendiente"
+      })
+      .eq("id", trabajoId);
+
+    return { error };
+  };
+
+  const limpiarLinkFacturaEnTrabajo = async (trabajoId) => {
+    if (!trabajoId) return { error: null };
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        factura_pdf_url: null,
+        factura_pdf_path: null,
+        factura_sms_estado: "error_upload_pdf"
       })
       .eq("id", trabajoId);
 
@@ -1463,6 +1546,22 @@ export default function ControlTrabajosMecanicos() {
   const crearFacturaPDF = async (trabajo) => {
     if (!trabajo) return;
 
+    // Siempre buscamos el trabajo más reciente en Supabase antes de generar la factura.
+    // Esto evita crear/enviar un PDF con valores viejos que ya no coinciden con la pantalla.
+    const { data: trabajoActualizado, error: errorTrabajoActualizado } = await supabase
+      .from("trabajos_mecanicos")
+      .select("*")
+      .eq("id", trabajo.id)
+      .single();
+
+    if (errorTrabajoActualizado) {
+      console.log(errorTrabajoActualizado);
+      alert("No se pudo leer la información actualizada del trabajo antes de crear la factura.");
+      return;
+    }
+
+    trabajo = trabajoActualizado || trabajo;
+
     const numeroFactura = generarNumeroFactura(trabajo);
     const totalesFactura = calcularTotalesContabilidad(
       trabajo.costo_piezas,
@@ -1471,7 +1570,9 @@ export default function ControlTrabajosMecanicos() {
     );
     const totalFactura = Number(totalesFactura.totalGenerado || 0);
 
-    const confirmar = confirm(`¿Crear/actualizar factura ${numeroFactura} para ${trabajo.cliente_nombre || "cliente no registrado"}?`);
+    const confirmar = confirm(
+      `¿Crear/actualizar factura ${numeroFactura} para ${trabajo.cliente_nombre || "cliente no registrado"}?\n\nTotal actual que tendrá la factura: ${dinero(totalFactura)}`
+    );
     if (!confirmar) return;
 
     const payloadFactura = {
@@ -1602,13 +1703,23 @@ export default function ControlTrabajosMecanicos() {
 
     ponerLogoEnTodasLasPaginas(doc, logoInfo);
 
-    const resultadoUploadPDF = await subirFacturaClientePDF(trabajo, numeroFactura, doc);
+    const resultadoUploadPDF = await subirFacturaClientePDF(trabajo, numeroFactura, doc, totalFactura);
 
     let mensajeFinal = `Factura ${numeroFactura} creada/actualizada y descargada correctamente.`;
 
     if (resultadoUploadPDF.error) {
       console.log(resultadoUploadPDF.error);
-      mensajeFinal += `\n\nOJO: La factura se descargó, pero no se pudo subir al bucket facturas-clientes. Revisa Storage o permisos del bucket.`;
+
+      // Si falló la subida, borramos el link guardado para evitar enviar por SMS una factura vieja.
+      const { error: errorLimpiarLink } = await limpiarLinkFacturaEnTrabajo(trabajo.id);
+      if (errorLimpiarLink) {
+        console.log(errorLimpiarLink);
+      }
+
+      mensajeFinal +=
+        `\n\nOJO: La factura se descargó, pero NO se pudo subir al bucket facturas-clientes.` +
+        `\n\nPor seguridad, el link viejo de factura fue removido para que no se envíe una factura incorrecta por SMS.` +
+        `\n\nRevisa Storage / Policies del bucket facturas-clientes.`;
     } else if (resultadoUploadPDF.url) {
       const { error: errorGuardarUrl } = await guardarLinkFacturaEnTrabajo(
         trabajo.id,
@@ -2324,6 +2435,22 @@ export default function ControlTrabajosMecanicos() {
   const abrirSMSCliente = async (trabajo, tipoMensaje = "factura_resena") => {
     if (!trabajo) return;
 
+    // Leemos el trabajo actualizado justo antes de preparar el SMS.
+    // Así nunca usamos un link viejo que quedó en memoria en la pantalla.
+    const { data: trabajoActualizado, error: errorTrabajoActualizado } = await supabase
+      .from("trabajos_mecanicos")
+      .select("*")
+      .eq("id", trabajo.id)
+      .single();
+
+    if (errorTrabajoActualizado) {
+      console.log(errorTrabajoActualizado);
+      alert("No se pudo verificar la factura actual antes de preparar el SMS.");
+      return;
+    }
+
+    trabajo = trabajoActualizado || trabajo;
+
     let telefono = await obtenerTelefonoClienteTrabajo(trabajo);
 
     if (!telefono) {
@@ -2340,7 +2467,11 @@ export default function ControlTrabajosMecanicos() {
     const facturaUrl = trabajo.factura_pdf_url || "";
 
     if ((tipoMensaje === "factura" || tipoMensaje === "factura_resena") && !facturaUrl) {
-      alert("Primero debes crear/actualizar la factura PDF para que el sistema guarde el link de la factura.");
+      alert(
+        "Primero debes crear/actualizar la factura PDF correctamente.\n\n" +
+        "No hay link de factura guardado o la última subida al bucket falló.\n\n" +
+        "Esto evita enviar por SMS una factura vieja o incorrecta."
+      );
       return;
     }
 
@@ -2696,7 +2827,7 @@ export default function ControlTrabajosMecanicos() {
               setEditForm({
                 ...editForm,
                 metodo_pago: e.target.value,
-                pago_recibido: e.target.value && e.target.value !== "Pendiente"
+                pago_recibido: e.target.value === "Pendiente" ? false : editForm.pago_recibido
               })
             }
             style={inputStyle}
@@ -2708,14 +2839,32 @@ export default function ControlTrabajosMecanicos() {
             ))}
           </select>
 
-          <label style={{ ...fieldLabel, display: "flex", alignItems: "center", gap: "10px" }}>
-            <input
-              type="checkbox"
-              checked={Boolean(editForm.pago_recibido)}
-              onChange={(e) => setEditForm({ ...editForm, pago_recibido: e.target.checked })}
-            />
-            Pago recibido
-          </label>
+          <div style={paymentSwitchBox}>
+            <div>
+              <strong>💵 Estado del pago</strong>
+              <p style={{ margin: "5px 0 0 0", color: "#d1d5db", fontSize: "13px" }}>
+                El método de pago no marca el cobro automáticamente. Usa este interruptor para confirmar si el dinero ya fue recibido.
+              </p>
+            </div>
+
+            <div style={paymentSwitchButtons}>
+              <button
+                type="button"
+                onClick={() => setEditForm({ ...editForm, pago_recibido: true })}
+                style={Boolean(editForm.pago_recibido) ? paidButtonActive : paidButton}
+              >
+                ✅ Pago recibido
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditForm({ ...editForm, pago_recibido: false })}
+                style={!Boolean(editForm.pago_recibido) ? pendingButtonActive : pendingButton}
+              >
+                ⏳ Pago pendiente
+              </button>
+            </div>
+          </div>
 
           <textarea placeholder="Notas" value={editForm.notas} onChange={(e) => setEditForm({ ...editForm, notas: e.target.value })} style={{ ...inputStyle, minHeight: "80px" }} />
 

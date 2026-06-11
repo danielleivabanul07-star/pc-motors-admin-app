@@ -12,7 +12,9 @@ function Dashboard() {
     trabajosSemana: [],
     trabajosMes: [],
     trabajosMecanicosSemana: [],
-    trabajosMecanicosMes: []
+    trabajosMecanicosMes: [],
+    trabajosPendientesSemana: [],
+    trabajosPendientesMes: []
   });
 
   const [ocultarTrabajosSemana, setOcultarTrabajosSemana] = useState(false);
@@ -38,6 +40,12 @@ function Dashboard() {
   }, []);
 
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
+
+  const porcentaje = (valor, total) => {
+    const totalNumero = Number(total || 0);
+    if (!totalNumero) return "0.00%";
+    return `${((Number(valor || 0) / totalNumero) * 100).toFixed(2)}%`;
+  };
 
   const convertirFechaSupabase = (valor) => {
     if (!valor) return null;
@@ -363,7 +371,9 @@ function Dashboard() {
       trabajosSemana,
       trabajosMes,
       trabajosMecanicosSemana,
-      trabajosMecanicosMes
+      trabajosMecanicosMes,
+      trabajosPendientesSemana,
+      trabajosPendientesMes
     });
 
     setOcultarTrabajosSemana(false);
@@ -371,6 +381,97 @@ function Dashboard() {
 
     if (mostrarAlerta) alert("Dashboard actualizado correctamente.");
   }
+
+  const metodosPago = [
+    "Cash",
+    "Zelle",
+    "Debit Card",
+    "Credit Card",
+    "Cash App",
+    "Apple Pay",
+    "Check",
+    "Financiamiento",
+    "Otro"
+  ];
+
+  const marcarTrabajoComoCobrado = async (trabajo) => {
+    if (!trabajo?.id) return;
+
+    let metodoPago = String(trabajo.metodo_pago || "").trim();
+
+    if (!metodoPago || metodoPago === "Pendiente" || metodoPago === "No registrado") {
+      metodoPago =
+        prompt(
+          `Método de pago recibido para ${trabajo.cliente_nombre || "cliente"}:\n\nOpciones: ${metodosPago.join(", ")}`,
+          "Cash"
+        ) || "";
+      metodoPago = metodoPago.trim();
+    }
+
+    if (!metodoPago || metodoPago === "Pendiente" || metodoPago === "No registrado") {
+      alert("Para marcar como cobrado debes indicar un método de pago válido.");
+      return;
+    }
+
+    const totalTrabajo = calcularTotalTrabajoMecanico(trabajo);
+
+    const confirmar = confirm(
+      `¿Marcar este trabajo como COBRADO?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}\nFactura: ${trabajo.numero_factura || "Sin factura"}\nMétodo: ${metodoPago}\nTotal: ${dinero(totalTrabajo)}`
+    );
+
+    if (!confirmar) return;
+
+    setRefrescando(true);
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        pago_recibido: true,
+        metodo_pago: metodoPago,
+        fecha_pago: new Date().toISOString()
+      })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      setRefrescando(false);
+      return;
+    }
+
+    alert("Pago marcado como cobrado correctamente.");
+    await cargarDashboard(false);
+  };
+
+  const marcarTrabajoComoPendiente = async (trabajo) => {
+    if (!trabajo?.id) return;
+
+    const confirmar = confirm(
+      `¿Marcar este trabajo como PENDIENTE de pago?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}\nFactura: ${trabajo.numero_factura || "Sin factura"}`
+    );
+
+    if (!confirmar) return;
+
+    setRefrescando(true);
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        pago_recibido: false,
+        fecha_pago: null
+      })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      setRefrescando(false);
+      return;
+    }
+
+    alert("Pago marcado como pendiente correctamente.");
+    await cargarDashboard(false);
+  };
 
   const guardarReporte = async (tipo) => {
     const esSemanal = tipo === "semanal";
@@ -430,7 +531,7 @@ function Dashboard() {
   return (
     <div style={pageBox}>
       <h1 style={titleStyle}>📊 Dashboard Financiero</h1>
-      <p style={subtitleStyle}>Resumen de clientes activos, trabajos atendidos, trabajos mecánicos y dinero realmente cobrado.</p>
+      <p style={subtitleStyle}>Resumen de cobros reales, pagos pendientes, métodos de pago y cargos exactos.</p>
 
       <div style={actionsBox}>
         <button onClick={() => guardarReporte("semanal")} style={saveButton}>💾 Guardar Reporte Semanal</button>
@@ -458,8 +559,8 @@ function Dashboard() {
       <div style={gridStyle}>
         <Card title="🧾 Inversión piezas" value={dinero(stats.semana.inversionPiezas)} />
         <Card title="💵 Venta piezas" value={dinero(stats.semana.ventaPiezas)} />
-        <Card title="🧾 Tax piezas 6%" value={dinero(stats.semana.taxPiezas6)} />
-        <Card title="💳 Cargo general 4%" value={dinero(stats.semana.cargoGeneral4)} />
+        <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.semana.taxPiezas6)} subtitle="6.00% sobre venta de piezas cobradas" />
+        <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.semana.cargoGeneral4)} subtitle="4.00% sobre piezas + mano de obra + tax piezas" />
         <Card title="📈 Ganancia piezas" value={dinero(stats.semana.gananciaPiezas)} />
         <Card title="🔧 Mano de obra" value={dinero(stats.semana.manoObra)} />
         <Card title="💲 Total cobrado" value={dinero(stats.semana.totalCobrado)} />
@@ -467,13 +568,48 @@ function Dashboard() {
         <Card title="✅ Ganancia aprox." value={dinero(stats.semana.gananciaAprox)} />
       </div>
 
+      <h2 style={sectionTitle}>⏳ Dinero finalizado pendiente por cobrarse esta semana</h2>
+      <div style={gridStyle}>
+        <Card
+          title="Pendiente por cobrar"
+          value={dinero(stats.semana.pagosPendientes)}
+          subtitle="Trabajos finalizados donde pago_recibido todavía está en No"
+        />
+      </div>
+
+      <h2 style={sectionTitle}>🧾 Trabajos finalizados pendientes de pago esta semana</h2>
+      {(stats.trabajosPendientesSemana || []).length === 0 ? (
+        <div style={emptyStyle}>No hay pagos pendientes esta semana.</div>
+      ) : (
+        <div style={tableBox}>
+          {(stats.trabajosPendientesSemana || []).map((trabajo) => (
+            <div key={`pendiente-semana-${trabajo.id}`} style={pendingRowStyle}>
+              <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
+              <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
+              <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
+              <span>{trabajo.metodo_pago || "Pendiente"}</span>
+              <span style={pendingBadge}>🔴 Pendiente</span>
+              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))}</span>
+              <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
+                ✅ Pasar a cobrado
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <h2 style={sectionTitle}>💳 Cobros por método esta semana</h2>
       <div style={gridStyle}>
         {Object.entries(stats.semana.cobrosPorMetodo || {}).length === 0 ? (
           <Card title="Sin cobros registrados" value="$0.00" />
         ) : (
           Object.entries(stats.semana.cobrosPorMetodo || {}).map(([metodo, total]) => (
-            <Card key={`semana-${metodo}`} title={`💳 ${metodo}`} value={dinero(total)} />
+            <Card
+              key={`semana-${metodo}`}
+              title={`💳 ${metodo}`}
+              value={dinero(total)}
+              subtitle={`${porcentaje(total, stats.semana.totalCobrado)} del total cobrado`}
+            />
           ))
         )}
       </div>
@@ -482,8 +618,8 @@ function Dashboard() {
       <div style={gridStyle}>
         <Card title="🧾 Inversión piezas" value={dinero(stats.mes.inversionPiezas)} />
         <Card title="💵 Venta piezas" value={dinero(stats.mes.ventaPiezas)} />
-        <Card title="🧾 Tax piezas 6%" value={dinero(stats.mes.taxPiezas6)} />
-        <Card title="💳 Cargo general 4%" value={dinero(stats.mes.cargoGeneral4)} />
+        <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.mes.taxPiezas6)} subtitle="6.00% sobre venta de piezas cobradas" />
+        <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.mes.cargoGeneral4)} subtitle="4.00% sobre piezas + mano de obra + tax piezas" />
         <Card title="📈 Ganancia piezas" value={dinero(stats.mes.gananciaPiezas)} />
         <Card title="🔧 Mano de obra" value={dinero(stats.mes.manoObra)} />
         <Card title="💲 Total cobrado" value={dinero(stats.mes.totalCobrado)} />
@@ -491,13 +627,48 @@ function Dashboard() {
         <Card title="✅ Ganancia aprox." value={dinero(stats.mes.gananciaAprox)} />
       </div>
 
+      <h2 style={sectionTitle}>⏳ Dinero finalizado pendiente por cobrarse este mes</h2>
+      <div style={gridStyle}>
+        <Card
+          title="Pendiente por cobrar"
+          value={dinero(stats.mes.pagosPendientes)}
+          subtitle="Trabajos finalizados donde pago_recibido todavía está en No"
+        />
+      </div>
+
+      <h2 style={sectionTitle}>🧾 Trabajos finalizados pendientes de pago este mes</h2>
+      {(stats.trabajosPendientesMes || []).length === 0 ? (
+        <div style={emptyStyle}>No hay pagos pendientes este mes.</div>
+      ) : (
+        <div style={tableBox}>
+          {(stats.trabajosPendientesMes || []).map((trabajo) => (
+            <div key={`pendiente-mes-${trabajo.id}`} style={pendingRowStyle}>
+              <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
+              <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
+              <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
+              <span>{trabajo.metodo_pago || "Pendiente"}</span>
+              <span style={pendingBadge}>🔴 Pendiente</span>
+              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))}</span>
+              <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
+                ✅ Pasar a cobrado
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <h2 style={sectionTitle}>💳 Cobros por método este mes</h2>
       <div style={gridStyle}>
         {Object.entries(stats.mes.cobrosPorMetodo || {}).length === 0 ? (
           <Card title="Sin cobros registrados" value="$0.00" />
         ) : (
           Object.entries(stats.mes.cobrosPorMetodo || {}).map(([metodo, total]) => (
-            <Card key={`mes-${metodo}`} title={`💳 ${metodo}`} value={dinero(total)} />
+            <Card
+              key={`mes-${metodo}`}
+              title={`💳 ${metodo}`}
+              value={dinero(total)}
+              subtitle={`${porcentaje(total, stats.mes.totalCobrado)} del total cobrado`}
+            />
           ))
         )}
       </div>
@@ -519,7 +690,10 @@ function Dashboard() {
               <span>{dinero(Number(trabajo.venta_piezas || 0) * 0.06)} tax piezas 6%</span>
               <span>{dinero((Number(trabajo.venta_piezas || 0) + Number(trabajo.mano_obra || 0) + Number(trabajo.venta_piezas || 0) * 0.06) * 0.04)} cargo 4%</span>
               <span>{dinero(trabajo.ganancia_piezas)} ganancia piezas</span>
-              <span>{dinero(trabajo.total_generado)} total</span>
+              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))} total</span>
+              <button onClick={() => marcarTrabajoComoPendiente(trabajo)} style={markPendingButton}>
+                ⏳ Pasar a pendiente
+              </button>
             </div>
           ))}
         </div>
@@ -528,11 +702,12 @@ function Dashboard() {
   );
 }
 
-function Card({ title, value }) {
+function Card({ title, value, subtitle }) {
   return (
     <div style={cardStyle}>
       <h2 style={cardTitleStyle}>{title}</h2>
       <p style={numberStyle}>{value}</p>
+      {subtitle && <p style={cardSubtitleStyle}>{subtitle}</p>}
     </div>
   );
 }
@@ -549,8 +724,14 @@ const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minma
 const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #f59e0b", boxShadow: "0 10px 25px rgba(0,0,0,0.25)" };
 const cardTitleStyle = { color: "white", fontSize: "20px", margin: 0, marginBottom: "10px" };
 const numberStyle = { fontSize: "30px", fontWeight: "bold", color: "#f59e0b", margin: 0 };
+const cardSubtitleStyle = { color: "#d1d5db", fontSize: "13px", margin: "8px 0 0 0", lineHeight: "1.35" };
 const tableBox = { background: "rgba(31, 41, 55, 0.95)", borderRadius: "12px", border: "1px solid #374151", overflow: "hidden" };
-const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const pendingRowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const markPaidButton = { padding: "10px 12px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const markPendingButton = { padding: "10px 12px", background: "#d97706", color: "#111827", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const pendingBadge = { background: "#7f1d1d", color: "white", padding: "6px 10px", borderRadius: "999px", fontWeight: "bold", textAlign: "center" };
+const paidBadge = { background: "#166534", color: "white", padding: "6px 10px", borderRadius: "999px", fontWeight: "bold", textAlign: "center" };
 const emptyStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #374151", color: "white" };
 
 export default Dashboard;
