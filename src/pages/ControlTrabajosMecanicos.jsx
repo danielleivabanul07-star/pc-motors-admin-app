@@ -765,15 +765,9 @@ export default function ControlTrabajosMecanicos() {
     return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   };
 
-  const esTrabajoFinalizadoParaDinero = (trabajo) => {
-    return (
-      trabajo?.estado === "finalizado" ||
-      Boolean(trabajo?.hora_fin) ||
-      Boolean(trabajo?.factura_creada_en) ||
-      Boolean(trabajo?.numero_factura) ||
-      Boolean(trabajo?.factura_pdf_url)
-    );
-  };
+ const esTrabajoFinalizadoParaDinero = (trabajo) => {
+  return trabajo?.estado === "finalizado";
+};
 
   const fechaBaseTrabajo = (trabajo) => convertirFechaSupabase(
     trabajo.factura_creada_en || trabajo.hora_fin
