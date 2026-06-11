@@ -407,6 +407,74 @@ function Mecanicos() {
     return Boolean(trabajo.numero_factura) || facturasTrabajos.some((f) => f.trabajo_id === trabajo.id);
   };
 
+  const parsearServiciosMecanicos = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const normalizarServicioMecanico = (servicio, index = 0) => {
+    const mecanicoNombre = String(
+      servicio.mecanico_nombre ||
+      servicio.mecanico ||
+      servicio.nombre_mecanico ||
+      ""
+    ).trim();
+
+    return {
+      id: servicio.id || `${Date.now()}-${index}`,
+      tipo: String(servicio.tipo || servicio.nombre || servicio.servicio || `Servicio ${index + 1}`).trim(),
+      mecanico_id: servicio.mecanico_id || null,
+      mecanico_nombre: mecanicoNombre,
+      precio: Number(servicio.precio ?? servicio.mano_obra ?? servicio.valor ?? servicio.costo ?? 0),
+      minutos: Number(servicio.minutos || servicio.tiempo_minutos || 0)
+    };
+  };
+
+  const serviciosMecanicosTrabajo = (trabajo) => {
+    return parsearServiciosMecanicos(trabajo?.servicios_mecanicos)
+      .map(normalizarServicioMecanico)
+      .filter((servicio) => String(servicio.mecanico_nombre || "").trim());
+  };
+
+  const trabajoTieneServiciosMecanicos = (trabajo) => {
+    return serviciosMecanicosTrabajo(trabajo).length > 0;
+  };
+
+  const serviciosDelMecanicoEnTrabajo = (trabajo, nombreMecanico) => {
+    const nombreNormalizado = normalizar(nombreMecanico);
+
+    return serviciosMecanicosTrabajo(trabajo).filter((servicio) => {
+      return normalizar(servicio.mecanico_nombre) === nombreNormalizado;
+    });
+  };
+
+  const contarTrabajoParaMecanico = (trabajo, nombreMecanico) => {
+    if (trabajoTieneServiciosMecanicos(trabajo)) {
+      return serviciosDelMecanicoEnTrabajo(trabajo, nombreMecanico).length > 0;
+    }
+
+    return normalizar(trabajo.mecanico_nombre) === normalizar(nombreMecanico);
+  };
+
+  const nombresMecanicosEnServicios = () => {
+    const nombres = [];
+
+    trabajosMecanicos.forEach((trabajo) => {
+      serviciosMecanicosTrabajo(trabajo).forEach((servicio) => {
+        if (servicio.mecanico_nombre) nombres.push(servicio.mecanico_nombre);
+      });
+    });
+
+    return nombres;
+  };
+
   const numeroFacturaClienteExiste = (numeroFactura) => {
     if (!numeroFactura) return false;
     return clientesFinalizados.some(
@@ -445,13 +513,14 @@ function Mecanicos() {
     let produccionTotal = clientes.reduce((total, cliente) => total + Number(cliente.total_final || 0), 0);
     let manoObraGenerada = clientes.reduce((total, cliente) => total + Number(cliente.costo_mano_obra || 0), 0);
     let gananciaPiezas = clientes.reduce((total, cliente) => total + Number(cliente.ganancia_piezas || 0), 0);
+    let serviciosAsignados = [];
 
     let trabajosFinalizados = clientes.length;
 
     trabajosMecanicos.forEach((trabajo) => {
-      if (normalizar(trabajo.mecanico_nombre) !== normalizar(nombreMecanico)) return;
       if (!trabajoManualEstaFacturado(trabajo)) return;
       if (numeroFacturaClienteExiste(trabajo.numero_factura)) return;
+      if (!contarTrabajoParaMecanico(trabajo, nombreMecanico)) return;
       if (trabajosContados.has(trabajo.id)) return;
 
       const fecha = fechaTrabajoManual(trabajo);
@@ -461,15 +530,57 @@ function Mecanicos() {
       trabajosFinalizados += 1;
 
       const factura = facturasUnicas.get(trabajo.id);
+      const tieneServicios = trabajoTieneServiciosMecanicos(trabajo);
 
-      if (factura) {
-        produccionTotal += Number(factura.total || 0);
-        manoObraGenerada += Number(factura.mano_obra || 0);
-        gananciaPiezas += calcularGananciaPiezasConCargo(factura.costo_piezas, factura.venta_piezas);
-      } else {
-        produccionTotal += Number(trabajo.total_generado || 0);
-        manoObraGenerada += Number(trabajo.mano_obra || 0);
-        gananciaPiezas += Number(trabajo.ganancia_piezas || 0);
+      if (tieneServicios) {
+        const serviciosDelMecanico = serviciosDelMecanicoEnTrabajo(trabajo, nombreMecanico);
+        const serviciosTrabajo = serviciosMecanicosTrabajo(trabajo);
+        const manoObraDelMecanico = serviciosDelMecanico.reduce(
+          (total, servicio) => total + Number(servicio.precio || 0),
+          0
+        );
+
+        const manoObraTotalTrabajo = serviciosTrabajo.reduce(
+          (total, servicio) => total + Number(servicio.precio || 0),
+          0
+        );
+
+        const totalTrabajo = factura
+          ? Number(factura.total || 0)
+          : Number(trabajo.total_generado || 0);
+
+        const gananciaPiezasTrabajo = factura
+          ? calcularGananciaPiezasConCargo(factura.costo_piezas, factura.venta_piezas)
+          : Number(trabajo.ganancia_piezas || 0);
+
+        const proporcion = manoObraTotalTrabajo > 0
+          ? manoObraDelMecanico / manoObraTotalTrabajo
+          : 0;
+
+        produccionTotal += redondearDinero(totalTrabajo * proporcion);
+        manoObraGenerada += manoObraDelMecanico;
+        gananciaPiezas += redondearDinero(gananciaPiezasTrabajo * proporcion);
+
+        serviciosAsignados = [
+          ...serviciosAsignados,
+          ...serviciosDelMecanico.map((servicio) => ({
+            ...servicio,
+            trabajo_id: trabajo.id,
+            cliente_nombre: trabajo.cliente_nombre || "Cliente no registrado",
+            numero_factura: trabajo.numero_factura || null,
+            fecha
+          }))
+        ];
+      } else if (normalizar(trabajo.mecanico_nombre) === normalizar(nombreMecanico)) {
+        if (factura) {
+          produccionTotal += Number(factura.total || 0);
+          manoObraGenerada += Number(factura.mano_obra || 0);
+          gananciaPiezas += calcularGananciaPiezasConCargo(factura.costo_piezas, factura.venta_piezas);
+        } else {
+          produccionTotal += Number(trabajo.total_generado || 0);
+          manoObraGenerada += Number(trabajo.mano_obra || 0);
+          gananciaPiezas += Number(trabajo.ganancia_piezas || 0);
+        }
       }
     });
 
@@ -477,7 +588,8 @@ function Mecanicos() {
       trabajosFinalizados,
       produccionTotal,
       manoObraGenerada,
-      gananciaPiezas
+      gananciaPiezas,
+      serviciosAsignados
     };
   };
 
@@ -518,7 +630,7 @@ function Mecanicos() {
     });
 
     trabajosMecanicos.forEach((trabajo) => {
-      if (normalizar(trabajo.mecanico_nombre) !== normalizar(nombreMecanico)) return;
+      if (!contarTrabajoParaMecanico(trabajo, nombreMecanico)) return;
       agregarSemana(fechaTrabajoManual(trabajo));
     });
 
@@ -581,6 +693,7 @@ function Mecanicos() {
     };
 
     mecanicosDB.forEach((mecanico) => asegurarMecanico(mecanico.nombre));
+    nombresMecanicosEnServicios().forEach((nombre) => asegurarMecanico(nombre));
 
     tiempos.forEach((tiempo) => {
       if (!tiempo.mecanico) return;
@@ -600,12 +713,43 @@ function Mecanicos() {
     });
 
     trabajosMecanicos.forEach((trabajo) => {
+      const fecha = convertirFechaSupabase(trabajo.hora_inicio || trabajo.creado_en);
+      const tieneServicios = trabajoTieneServiciosMecanicos(trabajo);
+
+      if (tieneServicios) {
+        const servicios = serviciosMecanicosTrabajo(trabajo);
+        const minutosTotalesServicios = servicios.reduce(
+          (total, servicio) => total + Number(servicio.minutos || 0),
+          0
+        );
+
+        servicios.forEach((servicio) => {
+          const item = asegurarMecanico(servicio.mecanico_nombre);
+          if (!item) return;
+
+          const proporcion = minutosTotalesServicios > 0
+            ? Number(servicio.minutos || 0) / minutosTotalesServicios
+            : 1 / servicios.length;
+
+          const minutos = Number(trabajo.minutos_trabajados || 0) * proporcion;
+
+          item.totalMinutos += minutos;
+          item.trabajos += 1;
+          item.trabajosManuales += 1;
+
+          if (trabajo.estado === "activo") item.activos += 1;
+          if (fecha && fecha >= semana) item.semanaMinutos += minutos;
+          if (fecha && fecha >= mes) item.mesMinutos += minutos;
+        });
+
+        return;
+      }
+
       if (!trabajo.mecanico_nombre) return;
       const item = asegurarMecanico(trabajo.mecanico_nombre);
       if (!item) return;
 
       const minutos = Number(trabajo.minutos_trabajados || 0);
-      const fecha = convertirFechaSupabase(trabajo.hora_inicio || trabajo.creado_en);
 
       item.totalMinutos += minutos;
       item.trabajos += 1;
@@ -639,6 +783,8 @@ function Mecanicos() {
           manoObraMes: produccionMes.manoObraGenerada,
           gananciaPiezasSemana: produccionSemana.gananciaPiezas,
           gananciaPiezasMes: produccionMes.gananciaPiezas,
+          serviciosAsignadosSemana: produccionSemana.serviciosAsignados || [],
+          serviciosAsignadosMes: produccionMes.serviciosAsignados || [],
           semanasTrabajadasSemana,
           semanasTrabajadasMes,
           baseComisionSemana: produccionSemana.manoObraGenerada,
@@ -794,6 +940,32 @@ function Mecanicos() {
               <p><strong>Ganancia piezas mes:</strong> {dinero(mecanico.gananciaPiezasMes)}</p>
               <p><strong>Base comisión semana:</strong> {dinero(mecanico.baseComisionSemana)}</p>
               <p><strong>Base comisión mes:</strong> {dinero(mecanico.baseComisionMes)}</p>
+
+              {(mecanico.serviciosAsignadosSemana || []).length > 0 && (
+                <div style={serviceBox}>
+                  <strong>🧾 Servicios asignados esta semana:</strong>
+                  {(mecanico.serviciosAsignadosSemana || []).map((servicio, index) => (
+                    <div key={`${servicio.trabajo_id}-${index}`} style={serviceItem}>
+                      <span>{servicio.tipo || "Servicio"}</span>
+                      <span>{servicio.cliente_nombre}</span>
+                      <strong>{dinero(servicio.precio)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {(mecanico.serviciosAsignadosMes || []).length > 0 && (
+                <div style={serviceBox}>
+                  <strong>🧾 Servicios asignados este mes:</strong>
+                  {(mecanico.serviciosAsignadosMes || []).map((servicio, index) => (
+                    <div key={`${servicio.trabajo_id}-mes-${index}`} style={serviceItem}>
+                      <span>{servicio.tipo || "Servicio"}</span>
+                      <span>{servicio.cliente_nombre}</span>
+                      <strong>{dinero(servicio.precio)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
               <p>
                 <strong>💰 Comisión ganada semana:</strong>{" "}
                 {dinero(
@@ -857,6 +1029,8 @@ const reportButton = { width: "100%", padding: "12px", marginTop: "10px", backgr
 const editButton = { width: "100%", padding: "12px", marginTop: "15px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const deleteButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const cleanButtonSmall = { width: "100%", padding: "12px", marginTop: "10px", background: "#92400e", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const serviceBox = { background: "#111827", border: "1px solid #374151", borderRadius: "10px", padding: "12px", marginTop: "12px", marginBottom: "12px" };
+const serviceItem = { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", padding: "8px 0", borderBottom: "1px solid #374151", color: "#d1d5db" };
 const emptyStyle = { background: "#1f2937", padding: "20px", borderRadius: "12px", border: "1px solid #374151" };
 
 export default Mecanicos;

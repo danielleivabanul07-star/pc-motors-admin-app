@@ -71,7 +71,8 @@ export default function ControlTrabajosMecanicos() {
     descuento: "",
     servicio_id: "",
     servicio_nombre: "",
-    servicio_precio: ""
+    servicio_precio: "",
+    servicio_mecanico_id: ""
   });
 
   const formBase = {
@@ -286,17 +287,60 @@ export default function ControlTrabajosMecanicos() {
     }
   };
 
-  const normalizarServicioEstimado = (servicio, index = 0) => ({
-    id: servicio.id || `${Date.now()}-servicio-${index}`,
-    catalogo_id: servicio.catalogo_id || servicio.servicio_id || null,
-    nombre: String(servicio.nombre || servicio.servicio || `Servicio ${index + 1}`).trim(),
-    precio: Number(servicio.precio ?? servicio.mano_obra ?? servicio.valor ?? 0)
-  });
+  const normalizarServicioEstimado = (servicio, index = 0) => {
+    const mecanicoId = servicio.mecanico_id || servicio.mecanicoId || null;
+    const mecanicoEncontrado = mecanicoId
+      ? mecanicos.find((m) => String(m.id) === String(mecanicoId))
+      : null;
+
+    const mecanicoNombre = String(
+      servicio.mecanico_nombre ||
+      servicio.mecanico ||
+      servicio.nombre_mecanico ||
+      mecanicoEncontrado?.nombre ||
+      ""
+    ).trim();
+
+    return {
+      id: servicio.id || `${Date.now()}-servicio-${index}`,
+      catalogo_id: servicio.catalogo_id || servicio.servicio_id || null,
+      nombre: String(servicio.nombre || servicio.servicio || `Servicio ${index + 1}`).trim(),
+      precio: Number(servicio.precio ?? servicio.mano_obra ?? servicio.valor ?? 0),
+      mecanico_id: mecanicoId,
+      mecanico_nombre: mecanicoNombre,
+      minutos: Number(servicio.minutos || servicio.tiempo_minutos || 0)
+    };
+  };
 
   const sumarServiciosEstimado = (serviciosValor) => {
     const servicios = parsearEstimadoServicios(serviciosValor).map(normalizarServicioEstimado);
     return redondearDinero(
       servicios.reduce((total, servicio) => total + Number(servicio.precio || 0), 0)
+    );
+  };
+
+  const serviciosMecanicosDesdeServicios = (serviciosValor) => {
+    return parsearEstimadoServicios(serviciosValor)
+      .map(normalizarServicioEstimado)
+      .filter((servicio) => String(servicio.nombre || "").trim() || Number(servicio.precio || 0) > 0)
+      .map((servicio, index) => ({
+        id: servicio.id || `${Date.now()}-servicio-mecanico-${index}`,
+        tipo: servicio.nombre || `Servicio ${index + 1}`,
+        servicio: servicio.nombre || `Servicio ${index + 1}`,
+        nombre: servicio.nombre || `Servicio ${index + 1}`,
+        mecanico_id: servicio.mecanico_id || null,
+        mecanico_nombre: servicio.mecanico_nombre || "",
+        precio: Number(servicio.precio || 0),
+        minutos: Number(servicio.minutos || 0)
+      }));
+  };
+
+  const calcularManoObraDesdeServiciosMecanicos = (serviciosValor) => {
+    return redondearDinero(
+      serviciosMecanicosDesdeServicios(serviciosValor).reduce(
+        (total, servicio) => total + Number(servicio.precio || 0),
+        0
+      )
     );
   };
 
@@ -1787,27 +1831,54 @@ export default function ControlTrabajosMecanicos() {
   const guardarEstimadoTrabajo = async (trabajo, piezas, servicios, manoObra, descuento = 0, estadoEstimado = "estimado_pendiente") => {
     const piezasLimpias = piezas.map(normalizarPiezaEstimado);
     const serviciosLimpios = servicios.map(normalizarServicioEstimado);
-    const manoObraFinal = serviciosLimpios.length > 0 ? sumarServiciosEstimado(serviciosLimpios) : Number(manoObra || 0);
+    const serviciosMecanicos = serviciosMecanicosDesdeServicios(serviciosLimpios);
+    const manoObraFinal = serviciosLimpios.length > 0 ? calcularManoObraDesdeServiciosMecanicos(serviciosLimpios) : Number(manoObra || 0);
     const totalesEstimado = calcularTotalesEstimado(piezasLimpias, manoObraFinal, descuento, serviciosLimpios);
 
-    const { error } = await supabase
+    const payloadEstimado = {
+      estimado_estado: estadoEstimado,
+      estimado_piezas: piezasLimpias,
+      estimado_servicios: serviciosLimpios,
+      servicios_mecanicos: serviciosMecanicos,
+      estimado_mano_obra: totalesEstimado.manoObra,
+      estimado_descuento: totalesEstimado.descuento,
+      estimado_creado_en: new Date().toISOString(),
+      estado: "estimado_pendiente",
+      fase_actual: "estimado_pendiente",
+      costo_piezas: totalesEstimado.costoPiezas,
+      venta_piezas: totalesEstimado.ventaPiezas,
+      mano_obra: totalesEstimado.manoObra
+    };
+
+    let { error } = await supabase
       .from("trabajos_mecanicos")
-      .update({
-        estimado_estado: estadoEstimado,
-        estimado_piezas: piezasLimpias,
-        estimado_servicios: serviciosLimpios,
-        estimado_mano_obra: totalesEstimado.manoObra,
-        estimado_descuento: totalesEstimado.descuento,
-        estimado_creado_en: new Date().toISOString(),
-        estado: "estimado_pendiente",
-        fase_actual: "estimado_pendiente",
-        costo_piezas: totalesEstimado.costoPiezas,
-        venta_piezas: totalesEstimado.ventaPiezas,
-        mano_obra: totalesEstimado.manoObra
-      })
+      .update(payloadEstimado)
       .eq("id", trabajo.id);
 
     if (error) {
+      const mensaje = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+
+      if (mensaje.includes("servicios_mecanicos")) {
+        console.log(error);
+        const payloadSinServiciosMecanicos = { ...payloadEstimado };
+        delete payloadSinServiciosMecanicos.servicios_mecanicos;
+
+        const segundoIntento = await supabase
+          .from("trabajos_mecanicos")
+          .update(payloadSinServiciosMecanicos)
+          .eq("id", trabajo.id);
+
+        error = segundoIntento.error;
+
+        if (!error) {
+          alert(
+            "Estimado guardado, pero falta crear la columna servicios_mecanicos en Supabase.\n\n" +
+            "Hasta que agregues esa columna, el sistema no podrá dividir correctamente la comisión por servicio/mecánico."
+          );
+          return true;
+        }
+      }
+
       console.log(error);
       alert(JSON.stringify(error, null, 2));
       return false;
@@ -1844,7 +1915,8 @@ export default function ControlTrabajosMecanicos() {
       descuento: String(trabajo.estimado_descuento || ""),
       servicio_id: "",
       servicio_nombre: "",
-      servicio_precio: ""
+      servicio_precio: "",
+      servicio_mecanico_id: trabajo.mecanico_id ? String(trabajo.mecanico_id) : ""
     });
   };
 
@@ -1857,7 +1929,8 @@ export default function ControlTrabajosMecanicos() {
       descuento: "",
       servicio_id: "",
       servicio_nombre: "",
-      servicio_precio: ""
+      servicio_precio: "",
+      servicio_mecanico_id: ""
     });
   };
 
@@ -1986,6 +2059,9 @@ export default function ControlTrabajosMecanicos() {
   const agregarServicioDraft = () => {
     const nombre = String(estimadoDraft.servicio_nombre || "").trim();
     const precio = Number(estimadoDraft.servicio_precio || 0);
+    const mecanicoServicio = mecanicos.find(
+      (m) => String(m.id) === String(estimadoDraft.servicio_mecanico_id)
+    );
 
     if (!nombre) {
       alert("Selecciona un servicio del catálogo antes de agregarlo.");
@@ -1997,6 +2073,11 @@ export default function ControlTrabajosMecanicos() {
       return;
     }
 
+    if (!mecanicoServicio) {
+      alert("Selecciona qué mecánico realizará este servicio.");
+      return;
+    }
+
     setEstimadoDraft((prev) => {
       const servicios = [
         ...(prev.servicios || []),
@@ -2004,7 +2085,10 @@ export default function ControlTrabajosMecanicos() {
           id: `${Date.now()}-servicio-${(prev.servicios || []).length}`,
           catalogo_id: prev.servicio_id || null,
           nombre,
-          precio
+          precio,
+          mecanico_id: mecanicoServicio.id,
+          mecanico_nombre: mecanicoServicio.nombre,
+          minutos: 0
         }
       ];
 
@@ -2022,10 +2106,22 @@ export default function ControlTrabajosMecanicos() {
   const actualizarServicioDraft = (index, campo, valor) => {
     setEstimadoDraft((prev) => {
       const servicios = [...(prev.servicios || [])];
-      servicios[index] = {
-        ...servicios[index],
-        [campo]: campo === "nombre" ? valor : Number(valor || 0)
-      };
+      const servicioActual = servicios[index] || {};
+
+      if (campo === "mecanico_id") {
+        const mecanicoSeleccionado = mecanicos.find((m) => String(m.id) === String(valor));
+        servicios[index] = {
+          ...servicioActual,
+          mecanico_id: valor || null,
+          mecanico_nombre: mecanicoSeleccionado?.nombre || ""
+        };
+      } else {
+        servicios[index] = {
+          ...servicioActual,
+          [campo]: campo === "nombre" ? valor : Number(valor || 0)
+        };
+      }
+
       return { ...prev, servicios, mano_obra: String(sumarServiciosEstimado(servicios)) };
     });
   };
@@ -2097,6 +2193,15 @@ export default function ControlTrabajosMecanicos() {
 
     if (servicioInvalido) {
       alert("Revisa los servicios: cada servicio debe tener nombre y precio válido.");
+      return;
+    }
+
+    const servicioSinMecanico = servicios.find((servicio) => {
+      return !String(servicio.mecanico_nombre || "").trim();
+    });
+
+    if (servicioSinMecanico) {
+      alert("Revisa los servicios: cada servicio debe tener un mecánico asignado para poder calcular la comisión exacta.");
       return;
     }
 
@@ -3108,6 +3213,7 @@ export default function ControlTrabajosMecanicos() {
                       return (
                         <p key={s.id || index} style={{ margin: "6px 0" }}>
                           🧾 {s.nombre} — {dinero(s.precio)}
+                          {s.mecanico_nombre ? ` — Mecánico: ${s.mecanico_nombre}` : ""}
                         </p>
                       );
                     })}
@@ -3139,6 +3245,18 @@ export default function ControlTrabajosMecanicos() {
                         <p style={internalHint}>
                           Uso interno: el catálogo solo sugiere el precio. En el PDF del cliente solo sale el precio final.
                         </p>
+                        <select
+                          value={estimadoDraft.servicio_mecanico_id || ""}
+                          onChange={(e) => setEstimadoDraft({ ...estimadoDraft, servicio_mecanico_id: e.target.value })}
+                          style={inputStyle}
+                        >
+                          <option value="">Seleccionar mecánico para este servicio</option>
+                          {mecanicos.map((mecanico) => (
+                            <option key={mecanico.id} value={mecanico.id}>
+                              {mecanico.nombre}
+                            </option>
+                          ))}
+                        </select>
                         <input
                           type="number"
                           placeholder="Precio final del servicio"
@@ -3153,18 +3271,37 @@ export default function ControlTrabajosMecanicos() {
                     <label style={fieldLabel}>Servicios del estimado</label>
                     {(estimadoDraft.servicios || []).length > 0 ? (
                       (estimadoDraft.servicios || []).map((servicio, index) => (
-                        <div key={servicio.id || index} style={pieceEditorRow}>
+                        <div key={servicio.id || index} style={serviceEditorRow}>
                           <input
                             placeholder="Nombre del servicio"
                             value={servicio.nombre}
                             onChange={(e) => actualizarServicioDraft(index, "nombre", e.target.value)}
                             style={pieceInput}
                           />
+                          <select
+                            value={servicio.mecanico_id || ""}
+                            onChange={(e) => actualizarServicioDraft(index, "mecanico_id", e.target.value)}
+                            style={pieceInput}
+                          >
+                            <option value="">Mecánico</option>
+                            {mecanicos.map((mecanico) => (
+                              <option key={mecanico.id} value={mecanico.id}>
+                                {mecanico.nombre}
+                              </option>
+                            ))}
+                          </select>
                           <input
                             type="number"
                             placeholder="Precio del servicio"
                             value={servicio.precio ?? ""}
                             onChange={(e) => actualizarServicioDraft(index, "precio", e.target.value)}
+                            style={piecePriceInput}
+                          />
+                          <input
+                            type="number"
+                            placeholder="Minutos opcional"
+                            value={servicio.minutos ?? ""}
+                            onChange={(e) => actualizarServicioDraft(index, "minutos", e.target.value)}
                             style={piecePriceInput}
                           />
                           <button onClick={() => eliminarServicioDraft(index)} style={miniDeleteButton}>🗑</button>
@@ -3493,6 +3630,14 @@ const internalHint = {
 const pieceEditorRow = {
   display: "grid",
   gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr auto",
+  gap: "8px",
+  marginBottom: "8px",
+  alignItems: "center"
+};
+
+const serviceEditorRow = {
+  display: "grid",
+  gridTemplateColumns: "1.4fr 1fr 1fr 1fr auto",
   gap: "8px",
   marginBottom: "8px",
   alignItems: "center"
