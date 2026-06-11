@@ -73,7 +73,9 @@ function Dashboard() {
     impuestos: 0,
     descuentos: 0,
     totalCobrado: 0,
-    gananciaAprox: 0
+    gananciaAprox: 0,
+    pagosPendientes: 0,
+    cobrosPorMetodo: {}
   });
 
   const calcularTotalesClientes = (clientes) => {
@@ -90,6 +92,38 @@ function Dashboard() {
     }, totalesVacios());
   };
 
+  const calcularTotalTrabajoMecanico = (trabajo) => {
+    const inversionPiezas = Number(trabajo.costo_piezas || 0);
+    const ventaPiezas = Number(trabajo.venta_piezas || 0);
+    const manoObra = Number(trabajo.mano_obra || 0);
+
+    const taxPiezas6 = redondearDinero(ventaPiezas * 0.06);
+    const subtotalBase = redondearDinero(ventaPiezas + manoObra + taxPiezas6);
+    const cargoGeneral4 = redondearDinero(subtotalBase * 0.04);
+    const totalGeneradoCalculado = redondearDinero(subtotalBase + cargoGeneral4);
+
+    return Number(trabajo.total_generado || totalGeneradoCalculado);
+  };
+
+  const metodoPagoValido = (trabajo) => {
+    const metodo = String(trabajo.metodo_pago || "").trim();
+    return metodo && metodo !== "Pendiente" && metodo !== "No registrado";
+  };
+
+  const esTrabajoFinalizado = (trabajo) => trabajo?.estado === "finalizado";
+
+  const esTrabajoCobrado = (trabajo) => {
+    return esTrabajoFinalizado(trabajo) && trabajo.pago_recibido === true && metodoPagoValido(trabajo);
+  };
+
+  const esTrabajoPendientePago = (trabajo) => {
+    return esTrabajoFinalizado(trabajo) && !esTrabajoCobrado(trabajo);
+  };
+
+  const calcularPagosPendientes = (trabajos) => {
+    return trabajos.reduce((total, trabajo) => total + calcularTotalTrabajoMecanico(trabajo), 0);
+  };
+
   const calcularTotalesTrabajosMecanicos = (trabajos) => {
     return trabajos.reduce((total, trabajo) => {
       const inversionPiezas = Number(trabajo.costo_piezas || 0);
@@ -102,7 +136,7 @@ function Dashboard() {
       const subtotalBase = redondearDinero(ventaPiezas + manoObra + taxPiezas6);
       const cargoGeneral4 = redondearDinero(subtotalBase * 0.04);
       const totalGeneradoCalculado = redondearDinero(subtotalBase + cargoGeneral4);
-      const totalGenerado = Number(trabajo.total_generado || totalGeneradoCalculado);
+      const totalGenerado = calcularTotalTrabajoMecanico(trabajo);
       const gananciaPiezas = Number(trabajo.ganancia_piezas || redondearDinero((ventaPiezas - inversionPiezas) + taxPiezas6));
 
       total.inversionPiezas += inversionPiezas;
@@ -114,6 +148,10 @@ function Dashboard() {
       total.impuestos += taxPiezas6 + cargoGeneral4;
       total.totalCobrado += totalGenerado;
       total.gananciaAprox += totalGenerado - inversionPiezas;
+
+      const metodo = String(trabajo.metodo_pago || "No registrado").trim() || "No registrado";
+      total.cobrosPorMetodo[metodo] = Number(total.cobrosPorMetodo[metodo] || 0) + totalGenerado;
+
       return total;
     }, totalesVacios());
   };
@@ -128,7 +166,17 @@ function Dashboard() {
     impuestos: Number(a.impuestos || 0) + Number(b.impuestos || 0),
     descuentos: Number(a.descuentos || 0) + Number(b.descuentos || 0),
     totalCobrado: Number(a.totalCobrado || 0) + Number(b.totalCobrado || 0),
-    gananciaAprox: Number(a.gananciaAprox || 0) + Number(b.gananciaAprox || 0)
+    gananciaAprox: Number(a.gananciaAprox || 0) + Number(b.gananciaAprox || 0),
+    pagosPendientes: Number(a.pagosPendientes || 0) + Number(b.pagosPendientes || 0),
+    cobrosPorMetodo: {
+      ...(a.cobrosPorMetodo || {}),
+      ...Object.fromEntries(
+        Object.entries(b.cobrosPorMetodo || {}).map(([metodo, valor]) => [
+          metodo,
+          Number(a.cobrosPorMetodo?.[metodo] || 0) + Number(valor || 0)
+        ])
+      )
+    }
   });
 
   const fechaTrabajoMecanico = (trabajo) => {
@@ -240,19 +288,12 @@ function Dashboard() {
       (trabajo) => trabajo.estado !== "finalizado" && !trabajo.hora_fin
     );
 
-    // Trabajos cobrados: son los únicos que cuentan dinero en el Dashboard.
-    // No se muestran ingresos, ganancias, taxes ni mano de obra de trabajos abiertos
-    // ni de trabajos finalizados que todavía estén pendientes de pago.
-    const trabajosMecanicosFinalizados = trabajosMecanicos.filter((trabajo) => {
-      const finalizado = trabajo.estado === "finalizado";
-      const pagoRecibido = trabajo.pago_recibido === true;
-      const metodoPagoValido =
-        trabajo.metodo_pago &&
-        trabajo.metodo_pago !== "Pendiente" &&
-        trabajo.metodo_pago !== "No registrado";
-
-      return finalizado && pagoRecibido && metodoPagoValido;
-    });
+    // Trabajos finalizados se separan en dos grupos:
+    // 1) cobrados: sí entran al total cobrado, ganancias, taxes y desglose por método.
+    // 2) pendientes: NO entran al total cobrado, pero se muestran aparte como pagos pendientes.
+    const trabajosMecanicosFinalizados = trabajosMecanicos.filter(esTrabajoFinalizado);
+    const trabajosMecanicosCobrados = trabajosMecanicos.filter(esTrabajoCobrado);
+    const trabajosMecanicosPendientesPago = trabajosMecanicos.filter(esTrabajoPendientePago);
 
     if (errorTrabajosMecanicos) {
       console.log(errorTrabajosMecanicos);
@@ -268,19 +309,34 @@ function Dashboard() {
     const trabajosMes = [];
 
     const trabajosMecanicosSemana =
-      trabajosMecanicosFinalizados.filter((trabajo) => {
+      trabajosMecanicosCobrados.filter((trabajo) => {
         const fecha = fechaTrabajoMecanico(trabajo);
         return fecha && fecha >= inicioSemanaActual;
       }) || [];
 
     const trabajosMecanicosMes =
-      trabajosMecanicosFinalizados.filter((trabajo) => {
+      trabajosMecanicosCobrados.filter((trabajo) => {
+        const fecha = fechaTrabajoMecanico(trabajo);
+        return fecha && fecha >= inicioMesActual;
+      }) || [];
+
+    const trabajosPendientesSemana =
+      trabajosMecanicosPendientesPago.filter((trabajo) => {
+        const fecha = fechaTrabajoMecanico(trabajo);
+        return fecha && fecha >= inicioSemanaActual;
+      }) || [];
+
+    const trabajosPendientesMes =
+      trabajosMecanicosPendientesPago.filter((trabajo) => {
         const fecha = fechaTrabajoMecanico(trabajo);
         return fecha && fecha >= inicioMesActual;
       }) || [];
 
     const semana = calcularTotalesTrabajosMecanicos(trabajosMecanicosSemana);
+    semana.pagosPendientes = calcularPagosPendientes(trabajosPendientesSemana);
+
     const mes = calcularTotalesTrabajosMecanicos(trabajosMecanicosMes);
+    mes.pagosPendientes = calcularPagosPendientes(trabajosPendientesMes);
 
     const clientesActivosDesdeTrabajos = new Set(
       trabajosMecanicosActivos
@@ -395,6 +451,7 @@ function Dashboard() {
         <Card title="📁 Clientes atendidos" value={stats.clientesAtendidos} />
         <Card title="🛠 Trabajos activos" value={stats.trabajosActivos} />
         <Card title="💰 Cobrado esta semana" value={dinero(stats.semana.totalCobrado)} />
+        <Card title="⏳ Pendiente de pago" value={dinero(stats.semana.pagosPendientes)} />
       </div>
 
       <h2 style={sectionTitle}>📅 Resumen de esta semana</h2>
@@ -406,7 +463,19 @@ function Dashboard() {
         <Card title="📈 Ganancia piezas" value={dinero(stats.semana.gananciaPiezas)} />
         <Card title="🔧 Mano de obra" value={dinero(stats.semana.manoObra)} />
         <Card title="💲 Total cobrado" value={dinero(stats.semana.totalCobrado)} />
+        <Card title="⏳ Pagos pendientes" value={dinero(stats.semana.pagosPendientes)} />
         <Card title="✅ Ganancia aprox." value={dinero(stats.semana.gananciaAprox)} />
+      </div>
+
+      <h2 style={sectionTitle}>💳 Cobros por método esta semana</h2>
+      <div style={gridStyle}>
+        {Object.entries(stats.semana.cobrosPorMetodo || {}).length === 0 ? (
+          <Card title="Sin cobros registrados" value="$0.00" />
+        ) : (
+          Object.entries(stats.semana.cobrosPorMetodo || {}).map(([metodo, total]) => (
+            <Card key={`semana-${metodo}`} title={`💳 ${metodo}`} value={dinero(total)} />
+          ))
+        )}
       </div>
 
       <h2 style={sectionTitle}>🗓 Resumen de este mes</h2>
@@ -418,7 +487,19 @@ function Dashboard() {
         <Card title="📈 Ganancia piezas" value={dinero(stats.mes.gananciaPiezas)} />
         <Card title="🔧 Mano de obra" value={dinero(stats.mes.manoObra)} />
         <Card title="💲 Total cobrado" value={dinero(stats.mes.totalCobrado)} />
+        <Card title="⏳ Pagos pendientes" value={dinero(stats.mes.pagosPendientes)} />
         <Card title="✅ Ganancia aprox." value={dinero(stats.mes.gananciaAprox)} />
+      </div>
+
+      <h2 style={sectionTitle}>💳 Cobros por método este mes</h2>
+      <div style={gridStyle}>
+        {Object.entries(stats.mes.cobrosPorMetodo || {}).length === 0 ? (
+          <Card title="Sin cobros registrados" value="$0.00" />
+        ) : (
+          Object.entries(stats.mes.cobrosPorMetodo || {}).map(([metodo, total]) => (
+            <Card key={`mes-${metodo}`} title={`💳 ${metodo}`} value={dinero(total)} />
+          ))
+        )}
       </div>
 
       <h2 style={sectionTitle}>🔎 Trabajos de esta semana</h2>
@@ -433,6 +514,7 @@ function Dashboard() {
               <strong>{trabajo.numero_factura || "Trabajo mecánico"}</strong>
               <span>{trabajo.cliente_nombre || "Cliente manual"}</span>
               <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
+              <span>{trabajo.metodo_pago || "No registrado"}</span>
               <span>{dinero(trabajo.costo_piezas)} inversión</span>
               <span>{dinero(Number(trabajo.venta_piezas || 0) * 0.06)} tax piezas 6%</span>
               <span>{dinero((Number(trabajo.venta_piezas || 0) + Number(trabajo.mano_obra || 0) + Number(trabajo.venta_piezas || 0) * 0.06) * 0.04)} cargo 4%</span>
@@ -468,7 +550,7 @@ const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borde
 const cardTitleStyle = { color: "white", fontSize: "20px", margin: 0, marginBottom: "10px" };
 const numberStyle = { fontSize: "30px", fontWeight: "bold", color: "#f59e0b", margin: 0 };
 const tableBox = { background: "rgba(31, 41, 55, 0.95)", borderRadius: "12px", border: "1px solid #374151", overflow: "hidden" };
-const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
 const emptyStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #374151", color: "white" };
 
 export default Dashboard;

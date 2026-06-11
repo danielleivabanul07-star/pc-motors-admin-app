@@ -794,6 +794,26 @@ function Mecanicos() {
               <p><strong>Ganancia piezas mes:</strong> {dinero(mecanico.gananciaPiezasMes)}</p>
               <p><strong>Base comisión semana:</strong> {dinero(mecanico.baseComisionSemana)}</p>
               <p><strong>Base comisión mes:</strong> {dinero(mecanico.baseComisionMes)}</p>
+              <p>
+                <strong>💰 Comisión ganada semana:</strong>{" "}
+                {dinero(
+                  mecanico.tipo_pago === "comision" ||
+                  mecanico.tipo_pago === "salario_mas_comision"
+                    ? mecanico.baseComisionSemana *
+                        (Number(mecanico.porcentaje_comision || 0) / 100)
+                    : 0
+                )}
+              </p>
+              <p>
+                <strong>💰 Comisión ganada mes:</strong>{" "}
+                {dinero(
+                  mecanico.tipo_pago === "comision" ||
+                  mecanico.tipo_pago === "salario_mas_comision"
+                    ? mecanico.baseComisionMes *
+                        (Number(mecanico.porcentaje_comision || 0) / 100)
+                    : 0
+                )}
+              </p>
               <p><strong>Semanas reales trabajadas semana:</strong> {mecanico.semanasTrabajadasSemana}</p>
               <p><strong>Semanas reales trabajadas mes:</strong> {mecanico.semanasTrabajadasMes}</p>
 
@@ -801,6 +821,14 @@ function Mecanicos() {
 
               <p><strong>Pago calculado semana:</strong> {dinero(mecanico.pagoSemana)}</p>
               <p><strong>Pago calculado mes:</strong> {dinero(mecanico.pagoMes)}</p>
+
+              <p style={{ color: "#22c55e", fontWeight: "bold", fontSize: "18px" }}>
+                💵 Total a pagar semana: {dinero(mecanico.pagoSemana)}
+              </p>
+
+              <p style={{ color: "#22c55e", fontWeight: "bold", fontSize: "18px" }}>
+                💵 Total a pagar mes: {dinero(mecanico.pagoMes)}
+              </p>
 
               <button onClick={() => guardarReporteMecanico("semanal", mecanico)} style={reportButton}>💾 Guardar Reporte Semanal</button>
               <button onClick={() => guardarReporteMecanico("mensual", mecanico)} style={reportButton}>💾 Guardar Reporte Mensual</button>
