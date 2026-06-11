@@ -3365,7 +3365,7 @@ export default function ControlTrabajosMecanicos() {
                           <div style={suggestedPriceBox}>
                             <strong>Promedio:</strong> {dinero(precioSugerido)}
                             <br />
-                            <span>Tax 6%: {dinero(taxPieza)}</span>
+                            <span>Cargo incluido: {dinero(taxPieza)}</span>
                           </div>
 
                           <input
@@ -3392,8 +3392,8 @@ export default function ControlTrabajosMecanicos() {
                     />
 
                     <div style={estimatePreviewBox}>
-                      <p><strong>Piezas al cliente con 6%:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).piezasCliente)}</p>
-                      <p><strong>Mano de obra final con 4%:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).manoObraCliente)}</p>
+                      <p><strong>Total piezas cliente:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).piezasCliente)}</p>
+                      <p><strong>Total mano de obra cliente:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).manoObraCliente)}</p>
                       <p><strong>Total estimado:</strong> <span style={statusBadge}>{dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).totalGenerado)}</span></p>
                     </div>
 

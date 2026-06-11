@@ -332,8 +332,8 @@ export default function FirmaEstimadoCliente({ token }) {
         )}
 
         <div style={totalBox}>
-          <div style={rowStyle}><span>Piezas con 6%</span><strong>{dinero(totales.piezasCliente)}</strong></div>
-          <div style={rowStyle}><span>Mano de obra con 4%</span><strong>{dinero(totales.manoObraCliente)}</strong></div>
+          <div style={rowStyle}><span>Piezas</span><strong>{dinero(totales.piezasCliente)}</strong></div>
+          <div style={rowStyle}><span>Mano de obra</span><strong>{dinero(totales.manoObraCliente)}</strong></div>
           {totales.descuento > 0 && <div style={rowStyle}><span>Descuento</span><strong>-{dinero(totales.descuento)}</strong></div>}
           <div style={totalRow}><span>Total estimado</span><strong>{dinero(totales.totalGenerado)}</strong></div>
         </div>
