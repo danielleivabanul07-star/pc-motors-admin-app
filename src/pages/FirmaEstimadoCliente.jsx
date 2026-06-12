@@ -86,7 +86,60 @@ export default function FirmaEstimadoCliente({ token }) {
     };
   };
 
+
+  const calcularLineasCliente = (trabajoActual) => {
+    const totalesBase = calcularTotales(trabajoActual);
+    const piezas = totalesBase.piezas || [];
+    const servicios = totalesBase.servicios || [];
+
+    const lineasBase = [
+      ...servicios.map((servicio, index) => ({
+        id: servicio.id || `servicio-${index}`,
+        tipo: "servicio",
+        nombre: servicio.nombre || `Servicio ${index + 1}`,
+        base: Number(servicio.precio || 0)
+      })),
+      ...piezas.map((pieza, index) => {
+        const cantidad = Number(pieza.cantidad || 1);
+        return {
+          id: pieza.id || `pieza-${index}`,
+          tipo: "pieza",
+          nombre: `${cantidad} x ${pieza.nombre || `Pieza ${index + 1}`}`,
+          base: Number(pieza.venta || 0) * cantidad
+        };
+      })
+    ].filter((linea) => Number(linea.base || 0) > 0);
+
+    const totalBase = lineasBase.reduce((total, linea) => total + Number(linea.base || 0), 0);
+    const totalCliente = Number(totalesBase.totalGenerado || 0);
+
+    let acumulado = 0;
+    const lineasCliente = lineasBase.map((linea, index) => {
+      const esUltima = index === lineasBase.length - 1;
+      const total = esUltima
+        ? redondearDinero(totalCliente - acumulado)
+        : redondearDinero(totalCliente * (Number(linea.base || 0) / totalBase));
+
+      acumulado = redondearDinero(acumulado + total);
+
+      return {
+        ...linea,
+        total
+      };
+    });
+
+    const lineasServicios = lineasCliente.filter((linea) => linea.tipo === "servicio");
+    const lineasPiezas = lineasCliente.filter((linea) => linea.tipo === "pieza");
+
+    return {
+      ...totalesBase,
+      lineasPiezas,
+      lineasServicios
+    };
+  };
+
   const totales = useMemo(() => calcularTotales(trabajo), [trabajo]);
+  const lineasCliente = useMemo(() => calcularLineasCliente(trabajo), [trabajo]);
 
   const cargarEstimado = async () => {
     if (!token) {
@@ -205,7 +258,7 @@ export default function FirmaEstimadoCliente({ token }) {
       return;
     }
 
-    const confirmar = confirm(`¿Aprobar y firmar este estimado por ${dinero(totales.totalGenerado)}?`);
+    const confirmar = confirm(`¿Aprobar y firmar este estimado por ${dinero(lineasCliente.totalGenerado)}?`);
     if (!confirmar) return;
 
     setGuardando(true);
@@ -304,38 +357,35 @@ export default function FirmaEstimadoCliente({ token }) {
 
         <hr style={lineStyle} />
 
-        {totales.servicios.length > 0 && (
+        {lineasCliente.lineasServicios.length > 0 && (
           <section>
             <h3 style={sectionTitle}>Servicios</h3>
-            {totales.servicios.map((servicio, index) => (
+            {lineasCliente.lineasServicios.map((servicio, index) => (
               <div key={servicio.id || index} style={rowStyle}>
                 <span>{servicio.nombre}</span>
-                <strong>{dinero(servicio.precio)}</strong>
+                <strong>{dinero(servicio.total)}</strong>
               </div>
             ))}
           </section>
         )}
 
-        {totales.piezas.length > 0 && (
+        {lineasCliente.lineasPiezas.length > 0 && (
           <section>
             <h3 style={sectionTitle}>Piezas</h3>
-            {totales.piezas.map((pieza, index) => {
-              const totalLinea = redondearDinero(Number(pieza.venta || 0) * Number(pieza.cantidad || 1) * 1.06);
-              return (
-                <div key={pieza.id || index} style={rowStyle}>
-                  <span>{pieza.cantidad} x {pieza.nombre}</span>
-                  <strong>{dinero(totalLinea)}</strong>
-                </div>
-              );
-            })}
+            {lineasCliente.lineasPiezas.map((pieza, index) => (
+              <div key={pieza.id || index} style={rowStyle}>
+                <span>{pieza.nombre}</span>
+                <strong>{dinero(pieza.total)}</strong>
+              </div>
+            ))}
           </section>
         )}
 
         <div style={totalBox}>
-          <div style={rowStyle}><span>Piezas</span><strong>{dinero(totales.piezasCliente)}</strong></div>
-          <div style={rowStyle}><span>Mano de obra</span><strong>{dinero(totales.manoObraCliente)}</strong></div>
-          {totales.descuento > 0 && <div style={rowStyle}><span>Descuento</span><strong>-{dinero(totales.descuento)}</strong></div>}
-          <div style={totalRow}><span>Total estimado</span><strong>{dinero(totales.totalGenerado)}</strong></div>
+          <div style={rowStyle}><span>Piezas</span><strong>{dinero(lineasCliente.piezasCliente)}</strong></div>
+          <div style={rowStyle}><span>Mano de obra</span><strong>{dinero(lineasCliente.manoObraCliente)}</strong></div>
+          {lineasCliente.descuento > 0 && <div style={rowStyle}><span>Descuento</span><strong>-{dinero(lineasCliente.descuento)}</strong></div>}
+          <div style={totalRow}><span>Total estimado</span><strong>{dinero(lineasCliente.totalGenerado)}</strong></div>
         </div>
 
         {!yaFirmado && (
