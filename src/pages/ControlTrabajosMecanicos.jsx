@@ -86,6 +86,7 @@ export default function ControlTrabajosMecanicos() {
     mano_obra: "",
     metodo_pago: "",
     pago_recibido: false,
+    pagos_detalle: [],
     notas: ""
   };
 
@@ -102,6 +103,7 @@ export default function ControlTrabajosMecanicos() {
     mano_obra: "",
     metodo_pago: "",
     pago_recibido: false,
+    pagos_detalle: [],
     notas: ""
   };
 
@@ -161,6 +163,172 @@ export default function ControlTrabajosMecanicos() {
     { value: "Otro", label: "🔁 Otro" },
     { value: "Pendiente", label: "⏳ Pendiente" }
   ];
+
+  const parsearPagosDetalle = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const normalizarPagoDetalle = (pago, index = 0) => ({
+    id: pago.id || `${Date.now()}-pago-${index}`,
+    metodo: String(pago.metodo || pago.metodo_pago || "").trim(),
+    monto: Number(pago.monto || pago.amount || 0),
+    nota: String(pago.nota || "").trim()
+  });
+
+  const limpiarPagosDetalle = (pagosValor) => {
+    return parsearPagosDetalle(pagosValor)
+      .map(normalizarPagoDetalle)
+      .filter((pago) => pago.metodo && Number(pago.monto || 0) > 0)
+      .map((pago, index) => ({
+        id: pago.id || `${Date.now()}-pago-${index}`,
+        metodo: pago.metodo,
+        monto: redondearDinero(pago.monto),
+        nota: pago.nota || ""
+      }));
+  };
+
+  const totalPagosDetalle = (pagosValor) => {
+    return redondearDinero(
+      limpiarPagosDetalle(pagosValor).reduce(
+        (total, pago) => total + Number(pago.monto || 0),
+        0
+      )
+    );
+  };
+
+  const resumenMetodoPago = (pagosValor, metodoFallback = "") => {
+    const pagos = limpiarPagosDetalle(pagosValor);
+    if (pagos.length === 0) return metodoFallback || null;
+
+    const metodos = [...new Set(pagos.map((pago) => pago.metodo).filter(Boolean))];
+
+    if (metodos.length === 1) return metodos[0];
+
+    return metodos.join(" + ");
+  };
+
+  const calcularTotalTrabajoCliente = (trabajo) => {
+    const totalDirecto = Number(trabajo.total_generado || trabajo.total_final || 0);
+    if (totalDirecto > 0) return redondearDinero(totalDirecto);
+
+    return redondearDinero(
+      calcularTotalesContabilidad(
+        trabajo.costo_piezas,
+        trabajo.venta_piezas,
+        trabajo.mano_obra
+      ).totalGenerado
+    );
+  };
+
+  const saldoPendienteTrabajo = (trabajo, pagosValor = null) => {
+    const totalTrabajo = calcularTotalTrabajoCliente(trabajo);
+    const totalPagado = totalPagosDetalle(pagosValor ?? trabajo?.pagos_detalle);
+    return redondearDinero(Math.max(0, totalTrabajo - totalPagado));
+  };
+
+  const agregarPagoEditForm = () => {
+    setEditForm((prev) => ({
+      ...prev,
+      pagos_detalle: [
+        ...(prev.pagos_detalle || []),
+        {
+          id: `${Date.now()}-pago-${(prev.pagos_detalle || []).length}`,
+          metodo: "",
+          monto: "",
+          nota: ""
+        }
+      ]
+    }));
+  };
+
+  const actualizarPagoEditForm = (index, campo, valor) => {
+    setEditForm((prev) => {
+      const pagos = [...(prev.pagos_detalle || [])];
+      pagos[index] = {
+        ...(pagos[index] || {}),
+        [campo]: campo === "monto" ? valor : valor
+      };
+
+      const totalTrabajo = calcularTotalTrabajoCliente({
+        ...trabajoEditando,
+        costo_piezas: prev.costo_piezas,
+        venta_piezas: prev.venta_piezas,
+        mano_obra: prev.mano_obra,
+        total_generado: 0
+      });
+      const pagado = totalPagosDetalle(pagos);
+      const completamentePagado = totalTrabajo > 0 && pagado >= totalTrabajo - 0.009;
+
+      return {
+        ...prev,
+        pagos_detalle: pagos,
+        pago_recibido: completamentePagado,
+        metodo_pago: resumenMetodoPago(pagos, prev.metodo_pago) || prev.metodo_pago
+      };
+    });
+  };
+
+  const eliminarPagoEditForm = (index) => {
+    setEditForm((prev) => {
+      const pagos = [...(prev.pagos_detalle || [])];
+      pagos.splice(index, 1);
+
+      const totalTrabajo = calcularTotalTrabajoCliente({
+        ...trabajoEditando,
+        costo_piezas: prev.costo_piezas,
+        venta_piezas: prev.venta_piezas,
+        mano_obra: prev.mano_obra,
+        total_generado: 0
+      });
+      const pagado = totalPagosDetalle(pagos);
+      const completamentePagado = totalTrabajo > 0 && pagado >= totalTrabajo - 0.009;
+
+      return {
+        ...prev,
+        pagos_detalle: pagos,
+        pago_recibido: completamentePagado,
+        metodo_pago: resumenMetodoPago(pagos, prev.metodo_pago) || ""
+      };
+    });
+  };
+
+  const aplicarPagoCompletoEditForm = () => {
+    if (!trabajoEditando) return;
+
+    const metodo = editForm.metodo_pago && editForm.metodo_pago !== "Pendiente"
+      ? editForm.metodo_pago
+      : "Cash";
+
+    const totalTrabajo = calcularTotalTrabajoCliente({
+      ...trabajoEditando,
+      costo_piezas: editForm.costo_piezas,
+      venta_piezas: editForm.venta_piezas,
+      mano_obra: editForm.mano_obra,
+      total_generado: 0
+    });
+
+    setEditForm((prev) => ({
+      ...prev,
+      metodo_pago: metodo,
+      pago_recibido: true,
+      pagos_detalle: [
+        {
+          id: `${Date.now()}-pago-completo`,
+          metodo,
+          monto: totalTrabajo,
+          nota: "Pago completo"
+        }
+      ]
+    }));
+  };
 
   const GOOGLE_REVIEW_URL = "https://g.page/r/CZDnoTatR0yOEAI/review";
   const APP_PUBLIC_URL = "https://pc-motors-admin-app.vercel.app";
@@ -1257,6 +1425,7 @@ export default function ControlTrabajosMecanicos() {
       mano_obra: String(trabajo.mano_obra || ""),
       metodo_pago: trabajo.metodo_pago || "",
       pago_recibido: Boolean(trabajo.pago_recibido),
+      pagos_detalle: limpiarPagosDetalle(trabajo.pagos_detalle),
       notas: trabajo.notas || ""
     });
 
@@ -1291,6 +1460,12 @@ export default function ControlTrabajosMecanicos() {
     }
 
     const totalesTrabajo = calcularTotalesContabilidad(costoPiezas, ventaPiezas, manoObra);
+    const pagosDetalleLimpios = limpiarPagosDetalle(editForm.pagos_detalle);
+    const totalPagado = totalPagosDetalle(pagosDetalleLimpios);
+    const saldoPendiente = redondearDinero(Math.max(0, totalesTrabajo.totalGenerado - totalPagado));
+    const pagoRecibidoFinal = totalesTrabajo.totalGenerado > 0
+      ? totalPagado >= totalesTrabajo.totalGenerado - 0.009
+      : Boolean(editForm.pago_recibido);
 
     const updateData = {
       cliente_nombre: editForm.cliente_nombre.trim() || null,
@@ -1304,9 +1479,12 @@ export default function ControlTrabajosMecanicos() {
       costo_piezas: totalesTrabajo.costoPiezas,
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
-      metodo_pago: editForm.metodo_pago || null,
-      pago_recibido: Boolean(editForm.pago_recibido),
-      fecha_pago: Boolean(editForm.pago_recibido)
+      metodo_pago: resumenMetodoPago(pagosDetalleLimpios, editForm.metodo_pago) || null,
+      pagos_detalle: pagosDetalleLimpios,
+      total_pagado: totalPagado,
+      saldo_pendiente: saldoPendiente,
+      pago_recibido: pagoRecibidoFinal,
+      fecha_pago: pagoRecibidoFinal
         ? (trabajoEditando.fecha_pago || new Date().toISOString())
         : null,
       notas: editForm.notas.trim() || null
@@ -1322,15 +1500,44 @@ export default function ControlTrabajosMecanicos() {
       updateData.minutos_trabajados = Math.round(diagnosticoMinutos) + Math.round(reparacionMinutos);
     }
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from("trabajos_mecanicos")
       .update(updateData)
       .eq("id", trabajoEditando.id);
 
     if (error) {
-      console.log(error);
-      alert(JSON.stringify(error, null, 2));
-      return;
+      const mensajeError = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+
+      if (
+        mensajeError.includes("pagos_detalle") ||
+        mensajeError.includes("total_pagado") ||
+        mensajeError.includes("saldo_pendiente")
+      ) {
+        const updateSinColumnasPagos = { ...updateData };
+        delete updateSinColumnasPagos.pagos_detalle;
+        delete updateSinColumnasPagos.total_pagado;
+        delete updateSinColumnasPagos.saldo_pendiente;
+
+        const segundoIntento = await supabase
+          .from("trabajos_mecanicos")
+          .update(updateSinColumnasPagos)
+          .eq("id", trabajoEditando.id);
+
+        error = segundoIntento.error;
+
+        if (!error) {
+          alert(
+            "Cambios guardados, pero falta crear las columnas de pagos detallados en Supabase.\n\n" +
+            "Ejecuta el SQL que te voy a dejar para que el sistema pueda guardar Cash + Zelle + Credit Card separados."
+          );
+        }
+      }
+
+      if (error) {
+        console.log(error);
+        alert(JSON.stringify(error, null, 2));
+        return;
+      }
     }
 
     if (editForm.estado === "finalizado") {
@@ -1401,6 +1608,18 @@ export default function ControlTrabajosMecanicos() {
       venta_piezas: totalesTrabajo.ventaPiezas,
       mano_obra: totalesTrabajo.manoObra,
       metodo_pago: metodoPago,
+      pagos_detalle: pagoRecibido
+        ? [
+            {
+              id: `${Date.now()}-pago-final`,
+              metodo: metodoPago,
+              monto: totalesTrabajo.totalGenerado,
+              nota: "Pago registrado al finalizar"
+            }
+          ]
+        : [],
+      total_pagado: pagoRecibido ? totalesTrabajo.totalGenerado : 0,
+      saldo_pendiente: pagoRecibido ? 0 : totalesTrabajo.totalGenerado,
       pago_recibido: pagoRecibido,
       fecha_pago: pagoRecibido ? (trabajo.fecha_pago || fin) : null,
     };
@@ -1430,16 +1649,46 @@ export default function ControlTrabajosMecanicos() {
 
     updateData.minutos_trabajados = totalGeneral;
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from("trabajos_mecanicos")
       .update(updateData)
       .eq("id", trabajo.id)
       .neq("estado", "finalizado");
 
     if (error) {
-      console.log(error);
-      alert(JSON.stringify(error, null, 2));
-      return;
+      const mensajeError = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+
+      if (
+        mensajeError.includes("pagos_detalle") ||
+        mensajeError.includes("total_pagado") ||
+        mensajeError.includes("saldo_pendiente")
+      ) {
+        const updateSinColumnasPagos = { ...updateData };
+        delete updateSinColumnasPagos.pagos_detalle;
+        delete updateSinColumnasPagos.total_pagado;
+        delete updateSinColumnasPagos.saldo_pendiente;
+
+        const segundoIntento = await supabase
+          .from("trabajos_mecanicos")
+          .update(updateSinColumnasPagos)
+          .eq("id", trabajo.id)
+          .neq("estado", "finalizado");
+
+        error = segundoIntento.error;
+
+        if (!error) {
+          alert(
+            "Trabajo finalizado, pero falta crear las columnas de pagos detallados en Supabase.\n\n" +
+            "Ejecuta el SQL para activar pagos divididos."
+          );
+        }
+      }
+
+      if (error) {
+        console.log(error);
+        alert(JSON.stringify(error, null, 2));
+        return;
+      }
     }
 
     const relacionesActualizadas = await finalizarRelacionesDelTrabajo({
@@ -3175,6 +3424,61 @@ export default function ControlTrabajosMecanicos() {
             </div>
           </div>
 
+          <div style={paymentsDetailBox}>
+            <h3 style={{ color: "#f59e0b", marginTop: 0 }}>💳 Pagos recibidos / pagos parciales</h3>
+            <p style={{ color: "#d1d5db", marginTop: 0 }}>
+              Puedes dividir el pago en varios métodos. Ejemplo: Cash + Zelle + Credit Card.
+            </p>
+
+            {(editForm.pagos_detalle || []).length === 0 ? (
+              <p style={{ color: "#9ca3af" }}>No hay pagos detallados agregados.</p>
+            ) : (
+              (editForm.pagos_detalle || []).map((pago, index) => (
+                <div key={pago.id || index} style={paymentRowStyle}>
+                  <select
+                    value={pago.metodo || ""}
+                    onChange={(e) => actualizarPagoEditForm(index, "metodo", e.target.value)}
+                    style={pieceInput}
+                  >
+                    {metodosPago
+                      .filter((metodo) => metodo.value !== "Pendiente")
+                      .map((metodo) => (
+                        <option key={metodo.value || "sin-metodo-pago"} value={metodo.value}>
+                          {metodo.label}
+                        </option>
+                      ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    placeholder="Monto"
+                    value={pago.monto ?? ""}
+                    onChange={(e) => actualizarPagoEditForm(index, "monto", e.target.value)}
+                    style={piecePriceInput}
+                  />
+
+                  <input
+                    placeholder="Nota opcional"
+                    value={pago.nota || ""}
+                    onChange={(e) => actualizarPagoEditForm(index, "nota", e.target.value)}
+                    style={pieceInput}
+                  />
+
+                  <button type="button" onClick={() => eliminarPagoEditForm(index)} style={miniDeleteButton}>🗑</button>
+                </div>
+              ))
+            )}
+
+            <div style={paymentsSummaryBox}>
+              <p><strong>Total factura:</strong> {dinero(calcularTotalTrabajoCliente({ ...trabajoEditando, costo_piezas: editForm.costo_piezas, venta_piezas: editForm.venta_piezas, mano_obra: editForm.mano_obra, total_generado: 0 }))}</p>
+              <p><strong>Total pagado:</strong> {dinero(totalPagosDetalle(editForm.pagos_detalle))}</p>
+              <p><strong>Pendiente:</strong> {dinero(Math.max(0, calcularTotalTrabajoCliente({ ...trabajoEditando, costo_piezas: editForm.costo_piezas, venta_piezas: editForm.venta_piezas, mano_obra: editForm.mano_obra, total_generado: 0 }) - totalPagosDetalle(editForm.pagos_detalle)))}</p>
+            </div>
+
+            <button type="button" onClick={agregarPagoEditForm} style={partsButton}>➕ Agregar pago</button>
+            <button type="button" onClick={aplicarPagoCompletoEditForm} style={paidButtonActive}>✅ Marcar pago completo</button>
+          </div>
+
           <textarea placeholder="Notas" value={editForm.notas} onChange={(e) => setEditForm({ ...editForm, notas: e.target.value })} style={{ ...inputStyle, minHeight: "80px" }} />
 
           <button onClick={guardarContabilidad} style={saveButton}>Guardar Cambios</button>
@@ -3597,6 +3901,24 @@ export default function ControlTrabajosMecanicos() {
               <button onClick={() => eliminarTrabajoCompleto(trabajo)} style={deleteButton}>🗑 Eliminar Trabajo</button>
 
               {trabajo.numero_factura && <p style={{ marginTop: "10px" }}><strong>Factura creada:</strong> {trabajo.numero_factura}</p>}
+
+              <div style={paymentsReadBox}>
+                <p><strong>💳 Método de pago:</strong> {resumenMetodoPago(trabajo.pagos_detalle, trabajo.metodo_pago) || "No registrado"}</p>
+                {limpiarPagosDetalle(trabajo.pagos_detalle).length > 0 && (
+                  <div>
+                    <strong>Pagos detallados:</strong>
+                    {limpiarPagosDetalle(trabajo.pagos_detalle).map((pago, index) => (
+                      <p key={pago.id || index} style={{ margin: "4px 0" }}>
+                        {pago.metodo}: {dinero(pago.monto)} {pago.nota ? `— ${pago.nota}` : ""}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                <p><strong>Total pagado:</strong> {dinero(Number(trabajo.total_pagado || 0) || totalPagosDetalle(trabajo.pagos_detalle))}</p>
+                <p><strong>Pendiente:</strong> {dinero(Number(trabajo.saldo_pendiente || 0) || saldoPendienteTrabajo(trabajo))}</p>
+                <p><strong>Estado pago:</strong> {trabajo.pago_recibido ? "🟢 Cobrado" : "🔴 Pendiente"}</p>
+              </div>
+
               {trabajo.factura_pdf_url && (
                 <p style={{ marginTop: "8px" }}>
                   <strong>PDF guardado:</strong>{" "}
@@ -3804,6 +4126,41 @@ const estimatePreviewBox = {
   padding: "12px",
   marginTop: "12px",
   marginBottom: "12px"
+};
+
+
+const paymentsDetailBox = {
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "12px",
+  padding: "14px",
+  marginBottom: "14px"
+};
+
+const paymentRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "1fr 130px 1fr auto",
+  gap: "8px",
+  alignItems: "center",
+  marginBottom: "8px"
+};
+
+const paymentsSummaryBox = {
+  background: "#0f172a",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  marginTop: "10px",
+  marginBottom: "10px"
+};
+
+const paymentsReadBox = {
+  background: "#0f172a",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  marginTop: "10px",
+  marginBottom: "10px"
 };
 
 const fileInput = { marginTop: "15px", color: "white" };
