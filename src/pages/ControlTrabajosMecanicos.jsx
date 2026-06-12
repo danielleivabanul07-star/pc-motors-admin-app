@@ -376,6 +376,58 @@ export default function ControlTrabajosMecanicos() {
     };
   };
 
+
+  const calcularLineasClienteEstimado = (piezasValor, manoObraValor = 0, descuentoValor = 0, serviciosValor = []) => {
+    const totales = calcularTotalesEstimado(piezasValor, manoObraValor, descuentoValor, serviciosValor);
+    const piezas = parsearEstimadoPiezas(piezasValor).map(normalizarPiezaEstimado);
+    const servicios = parsearEstimadoServicios(serviciosValor).map(normalizarServicioEstimado);
+
+    const lineasBase = [
+      ...servicios.map((servicio, index) => ({
+        id: servicio.id || `servicio-${index}`,
+        tipo: "servicio",
+        nombre: servicio.nombre || `Servicio ${index + 1}`,
+        base: Number(servicio.precio || 0)
+      })),
+      ...piezas.map((pieza, index) => {
+        const cantidad = Number(pieza.cantidad || 1);
+        return {
+          id: pieza.id || `pieza-${index}`,
+          tipo: "pieza",
+          nombre: `${cantidad} x ${pieza.nombre || `Pieza ${index + 1}`}`,
+          base: Number(pieza.venta || 0) * cantidad
+        };
+      })
+    ].filter((linea) => Number(linea.base || 0) > 0);
+
+    const totalBase = lineasBase.reduce((total, linea) => total + Number(linea.base || 0), 0);
+    const totalCliente = Number(totales.totalGenerado || 0);
+
+    let acumulado = 0;
+    const lineasCliente = lineasBase.map((linea, index) => {
+      const esUltima = index === lineasBase.length - 1;
+      const total = esUltima
+        ? redondearDinero(totalCliente - acumulado)
+        : redondearDinero(totalCliente * (Number(linea.base || 0) / totalBase));
+
+      acumulado = redondearDinero(acumulado + total);
+
+      return {
+        ...linea,
+        total
+      };
+    });
+
+    const lineasServicios = lineasCliente.filter((linea) => linea.tipo === "servicio");
+    const lineasPiezas = lineasCliente.filter((linea) => linea.tipo === "pieza");
+
+    return {
+      ...totales,
+      lineasPiezas,
+      lineasServicios
+    };
+  };
+
   const textoEstadoEstimado = (estado) => {
     if (estado === "estimado_pendiente") return "📋 Estimado pendiente";
     if (estado === "estimado_aprobado") return "✅ Estimado aprobado";
@@ -1768,11 +1820,55 @@ export default function ControlTrabajosMecanicos() {
       y += 9;
     };
 
-    const piezasCliente = redondearDinero(totalesFactura.ventaPiezas + totalesFactura.cargoPiezas6);
-    const manoObraCliente = redondearDinero(totalesFactura.manoObra + totalesFactura.cargoGeneral4);
+    const lineasClienteFactura = calcularLineasClienteEstimado(
+      trabajo.estimado_piezas,
+      trabajo.mano_obra,
+      trabajo.estimado_descuento,
+      trabajo.estimado_servicios
+    );
 
-    filaDinero("Piezas:", piezasCliente);
-    filaDinero("Mano de obra:", manoObraCliente);
+    const tieneDetalleEstimado =
+      lineasClienteFactura.lineasPiezas.length > 0 ||
+      lineasClienteFactura.lineasServicios.length > 0;
+
+    if (tieneDetalleEstimado) {
+      if (lineasClienteFactura.lineasServicios.length > 0) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Servicios:", 20, y);
+        y += 8;
+        lineasClienteFactura.lineasServicios.forEach((servicio) => {
+          doc.setFont("helvetica", "normal");
+          doc.text(String(servicio.nombre || "Servicio"), 20, y);
+          doc.text(dinero(servicio.total), 155, y);
+          y += 8;
+          if (y > 260) {
+            doc.addPage();
+            y = 20;
+          }
+        });
+        y += 4;
+      }
+
+      if (lineasClienteFactura.lineasPiezas.length > 0) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Piezas:", 20, y);
+        y += 8;
+        lineasClienteFactura.lineasPiezas.forEach((pieza) => {
+          doc.setFont("helvetica", "normal");
+          doc.text(String(pieza.nombre || "Pieza"), 20, y);
+          doc.text(dinero(pieza.total), 155, y);
+          y += 8;
+          if (y > 260) {
+            doc.addPage();
+            y = 20;
+          }
+        });
+        y += 4;
+      }
+    } else {
+      filaDinero("Piezas:", redondearDinero(totalesFactura.ventaPiezas + totalesFactura.cargoPiezas6));
+      filaDinero("Mano de obra:", redondearDinero(totalesFactura.manoObra + totalesFactura.cargoGeneral4));
+    }
 
     y += 3;
     doc.line(20, y, 190, y);
@@ -2064,7 +2160,7 @@ export default function ControlTrabajosMecanicos() {
     );
 
     if (!nombre) {
-      alert("Selecciona un servicio del catálogo antes de agregarlo.");
+      alert("Escribe el nombre del servicio o selecciona uno del catálogo antes de agregarlo.");
       return;
     }
 
@@ -2361,9 +2457,9 @@ export default function ControlTrabajosMecanicos() {
     };
 
     y += 4;
-    filaDinero("Piezas:", totales.piezasCliente);
-    filaDinero("Mano de obra:", totales.manoObraCliente);
-    if (totales.descuento > 0) filaDinero("Descuento:", -totales.descuento);
+    filaDinero("Piezas:", lineasClientePDF.piezasCliente);
+    filaDinero("Mano de obra:", lineasClientePDF.manoObraCliente);
+    if (lineasClientePDF.descuento > 0) filaDinero("Descuento:", -lineasClientePDF.descuento);
 
     y += 3;
     doc.line(20, y, 190, y);
@@ -2372,7 +2468,7 @@ export default function ControlTrabajosMecanicos() {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(15);
     doc.text("TOTAL ESTIMADO:", 20, y);
-    doc.text(dinero(totales.totalGenerado), 155, y);
+    doc.text(dinero(lineasClientePDF.totalGenerado), 155, y);
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
@@ -3212,7 +3308,7 @@ export default function ControlTrabajosMecanicos() {
                       const s = normalizarServicioEstimado(servicio, index);
                       return (
                         <p key={s.id || index} style={{ margin: "6px 0" }}>
-                          🧾 {s.nombre} — {dinero(s.precio)}
+                          🧾 {s.nombre} — {dinero(calcularLineasClienteEstimado([], s.precio, 0, [s]).lineasServicios[0]?.total || s.precio)}
                           {s.mecanico_nombre ? ` — Mecánico: ${s.mecanico_nombre}` : ""}
                         </p>
                       );
@@ -3232,7 +3328,7 @@ export default function ControlTrabajosMecanicos() {
                       onChange={(e) => aplicarServicioManoObra(e.target.value)}
                       style={inputStyle}
                     >
-                      <option value="">Seleccionar del catálogo</option>
+                      <option value="">Seleccionar del catálogo o escribir manual abajo</option>
                       {catalogoManoObra.map((servicio) => (
                         <option key={servicio.id} value={servicio.id}>
                           {textoServicioCatalogo(servicio)}
@@ -3240,33 +3336,46 @@ export default function ControlTrabajosMecanicos() {
                       ))}
                     </select>
 
-                    {estimadoDraft.servicio_id && (
-                      <>
-                        <p style={internalHint}>
-                          Uso interno: el catálogo solo sugiere el precio. En el PDF del cliente solo sale el precio final.
-                        </p>
-                        <select
-                          value={estimadoDraft.servicio_mecanico_id || ""}
-                          onChange={(e) => setEstimadoDraft({ ...estimadoDraft, servicio_mecanico_id: e.target.value })}
-                          style={inputStyle}
-                        >
-                          <option value="">Seleccionar mecánico para este servicio</option>
-                          {mecanicos.map((mecanico) => (
-                            <option key={mecanico.id} value={mecanico.id}>
-                              {mecanico.nombre}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          placeholder="Precio final del servicio"
-                          value={estimadoDraft.servicio_precio}
-                          onChange={(e) => setEstimadoDraft({ ...estimadoDraft, servicio_precio: e.target.value })}
-                          style={inputStyle}
-                        />
-                        <button onClick={agregarServicioDraft} style={partsButton}>➕ Agregar servicio</button>
-                      </>
-                    )}
+                    <p style={internalHint}>
+                      Puedes seleccionar un servicio del catálogo o escribir uno manual si no existe todavía. En el PDF del cliente solo sale el servicio y el precio final.
+                    </p>
+
+                    <input
+                      type="text"
+                      placeholder="Nombre del servicio manual o seleccionado"
+                      value={estimadoDraft.servicio_nombre}
+                      onChange={(e) =>
+                        setEstimadoDraft({
+                          ...estimadoDraft,
+                          servicio_id: "",
+                          servicio_nombre: e.target.value
+                        })
+                      }
+                      style={inputStyle}
+                    />
+
+                    <select
+                      value={estimadoDraft.servicio_mecanico_id || ""}
+                      onChange={(e) => setEstimadoDraft({ ...estimadoDraft, servicio_mecanico_id: e.target.value })}
+                      style={inputStyle}
+                    >
+                      <option value="">Seleccionar mecánico para este servicio</option>
+                      {mecanicos.map((mecanico) => (
+                        <option key={mecanico.id} value={mecanico.id}>
+                          {mecanico.nombre}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="number"
+                      placeholder="Precio final del servicio"
+                      value={estimadoDraft.servicio_precio}
+                      onChange={(e) => setEstimadoDraft({ ...estimadoDraft, servicio_precio: e.target.value })}
+                      style={inputStyle}
+                    />
+
+                    <button onClick={agregarServicioDraft} style={partsButton}>➕ Agregar servicio</button>
 
                     <label style={fieldLabel}>Servicios del estimado</label>
                     {(estimadoDraft.servicios || []).length > 0 ? (
@@ -3392,8 +3501,8 @@ export default function ControlTrabajosMecanicos() {
                     />
 
                     <div style={estimatePreviewBox}>
-                      <p><strong>Total piezas cliente:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).piezasCliente)}</p>
-                      <p><strong>Total mano de obra cliente:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).manoObraCliente)}</p>
+                      <p><strong>Piezas:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).piezasCliente)}</p>
+                      <p><strong>Mano de obra:</strong> {dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).manoObraCliente)}</p>
                       <p><strong>Total estimado:</strong> <span style={statusBadge}>{dinero(calcularTotalesEstimado(estimadoDraft.piezas, estimadoDraft.mano_obra, estimadoDraft.descuento, estimadoDraft.servicios).totalGenerado)}</span></p>
                     </div>
 
