@@ -2356,7 +2356,9 @@ export default function ControlTrabajosMecanicos() {
 
     const piezas = parsearEstimadoPiezas(trabajoPDF.estimado_piezas).map(normalizarPiezaEstimado);
     const servicios = parsearEstimadoServicios(trabajoPDF.estimado_servicios).map(normalizarServicioEstimado);
-    const manoObraPDF = servicios.length > 0 ? sumarServiciosEstimado(servicios) : Number(trabajoPDF.estimado_mano_obra || trabajoPDF.mano_obra || 0);
+    const manoObraPDF = servicios.length > 0
+      ? sumarServiciosEstimado(servicios)
+      : Number(trabajoPDF.estimado_mano_obra || trabajoPDF.mano_obra || 0);
     const descuentoPDF = Number(trabajoPDF.estimado_descuento || 0);
 
     if (piezas.length === 0 && servicios.length === 0 && manoObraPDF <= 0) {
@@ -2365,11 +2367,23 @@ export default function ControlTrabajosMecanicos() {
     }
 
     const numeroEstimado = `EST-${generarNumeroFactura(trabajoPDF)}`;
-    const totales = calcularTotalesEstimado(piezas, manoObraPDF, descuentoPDF, servicios);
+    const lineasClientePDF = calcularLineasClienteEstimado(
+      piezas,
+      manoObraPDF,
+      descuentoPDF,
+      servicios
+    );
 
     const logoInfo = await cargarLogoFactura();
     const doc = new jsPDF();
     let y = 18;
+
+    const asegurarEspacio = (altoNecesario = 10) => {
+      if (y + altoNecesario > 265) {
+        doc.addPage();
+        y = 20;
+      }
+    };
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
@@ -2384,6 +2398,7 @@ export default function ControlTrabajosMecanicos() {
     doc.setFontSize(11);
 
     const escribir = (label, valor) => {
+      asegurarEspacio(8);
       doc.setFont("helvetica", "bold");
       doc.text(label, 20, y);
       doc.setFont("helvetica", "normal");
@@ -2405,50 +2420,40 @@ export default function ControlTrabajosMecanicos() {
     doc.text("Detalle del estimado:", 20, y);
     y += 8;
 
-    doc.setFont("helvetica", "bold");
-    if (servicios.length > 0) {
+    if (lineasClientePDF.lineasServicios.length > 0) {
+      asegurarEspacio(12);
+      doc.setFont("helvetica", "bold");
       doc.text("Servicios:", 20, y);
       y += 8;
+
       doc.setFont("helvetica", "normal");
-      servicios.forEach((servicio) => {
+      lineasClientePDF.lineasServicios.forEach((servicio) => {
+        asegurarEspacio(8);
         doc.text(String(servicio.nombre || "Servicio").substring(0, 70), 20, y);
-        doc.text(dinero(servicio.precio), 155, y);
+        doc.text(dinero(servicio.total), 155, y);
         y += 8;
-        if (y > 260) {
-          doc.addPage();
-          y = 20;
-        }
       });
       y += 4;
     }
 
-    if (piezas.length > 0) {
+    if (lineasClientePDF.lineasPiezas.length > 0) {
+      asegurarEspacio(12);
       doc.setFont("helvetica", "bold");
       doc.text("Piezas:", 20, y);
       y += 8;
+
+      doc.setFont("helvetica", "normal");
+      lineasClientePDF.lineasPiezas.forEach((pieza) => {
+        asegurarEspacio(8);
+        doc.text(String(pieza.nombre || "Pieza").substring(0, 70), 20, y);
+        doc.text(dinero(pieza.total), 155, y);
+        y += 8;
+      });
+      y += 4;
     }
 
-    doc.setFont("helvetica", "normal");
-    piezas.forEach((pieza) => {
-      const precioPiezaCliente = Number(
-        pieza.venta ??
-        pieza.precio_venta ??
-        pieza.precio_cliente ??
-        pieza.precio ??
-        0
-      );
-      const totalLineaConCargo = redondearDinero(precioPiezaCliente * Number(pieza.cantidad || 1) * 1.06);
-      const textoPieza = `${pieza.cantidad} x ${pieza.nombre}`;
-      doc.text(textoPieza.substring(0, 70), 20, y);
-      doc.text(dinero(totalLineaConCargo), 155, y);
-      y += 8;
-      if (y > 260) {
-        doc.addPage();
-        y = 20;
-      }
-    });
-
     const filaDinero = (label, valor) => {
+      asegurarEspacio(9);
       doc.setFont("helvetica", "bold");
       doc.text(label, 20, y);
       doc.setFont("helvetica", "normal");
@@ -2462,6 +2467,7 @@ export default function ControlTrabajosMecanicos() {
     if (lineasClientePDF.descuento > 0) filaDinero("Descuento:", -lineasClientePDF.descuento);
 
     y += 3;
+    asegurarEspacio(20);
     doc.line(20, y, 190, y);
     y += 12;
 
