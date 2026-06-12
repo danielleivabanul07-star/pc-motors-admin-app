@@ -3319,7 +3319,16 @@ export default function ControlTrabajosMecanicos() {
   });
 
   return (
-    <div>
+    <div style={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
+      <style>
+        {`
+          @media (max-width: 1100px) {
+            .trabajos-grid {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}
+      </style>
       <h1 style={titleStyle}>🔧 Control Central de Trabajos</h1>
 
       <div style={summaryGrid}>
@@ -3518,7 +3527,7 @@ export default function ControlTrabajosMecanicos() {
       ) : trabajosFiltrados.length === 0 ? (
         <div style={emptyStyle}>No hay resultados para esa búsqueda.</div>
       ) : (
-        <div style={gridStyle}>
+        <div className="trabajos-grid" style={gridStyle}>
           {trabajosFiltrados.map((trabajo) => (
             <div key={trabajo.id} style={cardStyle}>
               <h2 style={{ color: "#f59e0b", marginTop: 0 }}>{trabajo.mecanico_nombre}</h2>
@@ -3972,8 +3981,25 @@ const saveButton = { width: "100%", padding: "12px", background: "#16a34a", colo
 const cancelButton = { width: "100%", padding: "12px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const editButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const finishButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
-const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: "20px" };
-const cardStyle = { background: "#1f2937", padding: "20px", borderRadius: "14px", border: "1px solid #374151" };
+const gridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "20px",
+  alignItems: "start",
+  width: "100%",
+  maxWidth: "100%",
+  overflowX: "hidden"
+};
+const cardStyle = {
+  background: "#1f2937",
+  padding: "20px",
+  borderRadius: "14px",
+  border: "1px solid #374151",
+  minWidth: 0,
+  maxWidth: "100%",
+  overflowX: "auto",
+  wordBreak: "break-word"
+};
 const lineStyle = { border: "none", borderTop: "1px solid #374151", margin: "15px 0" };
 const statusBadge = { background: "#f59e0b", color: "#111827", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
 const activeBadge = { background: "#16a34a", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
@@ -4139,10 +4165,11 @@ const paymentsDetailBox = {
 
 const paymentRowStyle = {
   display: "grid",
-  gridTemplateColumns: "1fr 130px 1fr auto",
+  gridTemplateColumns: "minmax(130px, 1fr) minmax(100px, 130px) minmax(130px, 1fr) auto",
   gap: "8px",
   alignItems: "center",
-  marginBottom: "8px"
+  marginBottom: "8px",
+  overflowX: "auto"
 };
 
 const paymentsSummaryBox = {
