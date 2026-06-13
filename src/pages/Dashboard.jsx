@@ -71,6 +71,110 @@ function Dashboard() {
 
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
 
+  const normalizarMetodoPago = (metodoValor) => {
+    const texto = String(metodoValor || "").trim();
+    const clave = texto.toLowerCase();
+
+    if (!clave || clave === "pendiente" || clave === "no registrado") return "";
+    if (clave === "cash" || clave === "efectivo") return "Cash";
+    if (clave === "zelle") return "Zelle";
+    if (clave === "debit card" || clave === "debit" || clave === "tarjeta debito" || clave === "tarjeta de debito") return "Debit Card";
+    if (clave === "credit card" || clave === "credit" || clave === "tarjeta credito" || clave === "tarjeta de credito") return "Credit Card";
+    if (clave === "cash app" || clave === "cashapp") return "Cash App";
+    if (clave === "apple pay" || clave === "applepay") return "Apple Pay";
+    if (clave === "check" || clave === "cheque") return "Check";
+    if (clave === "financiamiento" || clave === "financing" || clave === "finance") return "Financiamiento";
+    if (clave === "otro" || clave === "other") return "Otro";
+
+    return texto;
+  };
+
+  const parsearPagosDetalle = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const limpiarPagosDetalle = (pagosValor) => {
+    return parsearPagosDetalle(pagosValor)
+      .map((pago, index) => ({
+        id: pago.id || `${Date.now()}-pago-${index}`,
+        metodo: normalizarMetodoPago(pago.metodo || pago.metodo_pago),
+        monto: redondearDinero(Number(pago.monto || pago.amount || 0)),
+        nota: String(pago.nota || "").trim()
+      }))
+      .filter((pago) => pago.metodo && pago.monto > 0);
+  };
+
+  const totalPagosDetalle = (pagosValor) => {
+    return redondearDinero(
+      limpiarPagosDetalle(pagosValor).reduce((total, pago) => total + Number(pago.monto || 0), 0)
+    );
+  };
+
+  const pagosDetalleTrabajo = (trabajo) => {
+    const pagos = limpiarPagosDetalle(trabajo?.pagos_detalle);
+    if (pagos.length > 0) return pagos;
+
+    const metodo = normalizarMetodoPago(trabajo?.metodo_pago);
+    const total = calcularTotalTrabajoMecanico(trabajo || {});
+
+    if (metodo && trabajo?.pago_recibido === true && total > 0) {
+      return [
+        {
+          id: `fallback-${trabajo.id || Date.now()}`,
+          metodo,
+          monto: total,
+          nota: "Pago registrado"
+        }
+      ];
+    }
+
+    return [];
+  };
+
+  const totalPagadoTrabajo = (trabajo) => {
+    const totalDetalle = totalPagosDetalle(trabajo?.pagos_detalle);
+    if (totalDetalle > 0) return totalDetalle;
+    if (Number(trabajo?.total_pagado || 0) > 0) return redondearDinero(trabajo.total_pagado);
+    if (trabajo?.pago_recibido === true) return calcularTotalTrabajoMecanico(trabajo);
+    return 0;
+  };
+
+  const saldoPendienteTrabajo = (trabajo) => {
+    const total = calcularTotalTrabajoMecanico(trabajo);
+    const pagado = totalPagadoTrabajo(trabajo);
+    const saldoBD = Number(trabajo?.saldo_pendiente || 0);
+    if (saldoBD > 0) return redondearDinero(saldoBD);
+    return redondearDinero(Math.max(0, total - pagado));
+  };
+
+  const pagosPorMetodoTrabajo = (trabajo) => {
+    const resumen = {};
+    pagosDetalleTrabajo(trabajo).forEach((pago) => {
+      const metodo = normalizarMetodoPago(pago.metodo);
+      if (!metodo) return;
+      resumen[metodo] = redondearDinero(Number(resumen[metodo] || 0) + Number(pago.monto || 0));
+    });
+    return resumen;
+  };
+
+  const textoPagosDetalle = (trabajo) => {
+    const pagos = pagosDetalleTrabajo(trabajo);
+    if (pagos.length === 0) return trabajo?.pago_recibido ? (trabajo?.metodo_pago || "No registrado") : "Pendiente";
+    return pagos.map((pago) => `${pago.metodo} ${dinero(pago.monto)}`).join(" + ");
+  };
+
+  const montoMetodoTrabajo = (trabajo, metodo) => {
+    return pagosPorMetodoTrabajo(trabajo)[metodo] || 0;
+  };
+
   const totalesVacios = () => ({
     inversionPiezas: 0,
     ventaPiezas: 0,
@@ -113,23 +217,20 @@ function Dashboard() {
     return Number(trabajo.total_generado || totalGeneradoCalculado);
   };
 
-  const metodoPagoValido = (trabajo) => {
-    const metodo = String(trabajo.metodo_pago || "").trim();
-    return metodo && metodo !== "Pendiente" && metodo !== "No registrado";
-  };
-
   const esTrabajoFinalizado = (trabajo) => trabajo?.estado === "finalizado";
 
   const esTrabajoCobrado = (trabajo) => {
-    return esTrabajoFinalizado(trabajo) && trabajo.pago_recibido === true && metodoPagoValido(trabajo);
+    return esTrabajoFinalizado(trabajo) && totalPagadoTrabajo(trabajo) > 0;
   };
 
   const esTrabajoPendientePago = (trabajo) => {
-    return esTrabajoFinalizado(trabajo) && !esTrabajoCobrado(trabajo);
+    return esTrabajoFinalizado(trabajo) && saldoPendienteTrabajo(trabajo) > 0;
   };
 
   const calcularPagosPendientes = (trabajos) => {
-    return trabajos.reduce((total, trabajo) => total + calcularTotalTrabajoMecanico(trabajo), 0);
+    return redondearDinero(
+      trabajos.reduce((total, trabajo) => total + saldoPendienteTrabajo(trabajo), 0)
+    );
   };
 
   const calcularTotalesTrabajosMecanicos = (trabajos) => {
@@ -138,27 +239,29 @@ function Dashboard() {
       const ventaPiezas = Number(trabajo.venta_piezas || 0);
       const manoObra = Number(trabajo.mano_obra || 0);
 
-      // Estos dos cargos se calculan igual que en Control Trabajos:
-      // 6% sobre las piezas vendidas y 4% sobre piezas + mano de obra + cargo piezas.
       const taxPiezas6 = redondearDinero(ventaPiezas * 0.06);
       const subtotalBase = redondearDinero(ventaPiezas + manoObra + taxPiezas6);
       const cargoGeneral4 = redondearDinero(subtotalBase * 0.04);
-      const totalGeneradoCalculado = redondearDinero(subtotalBase + cargoGeneral4);
       const totalGenerado = calcularTotalTrabajoMecanico(trabajo);
+      const totalPagado = totalPagadoTrabajo(trabajo);
+      const proporcionPagada = totalGenerado > 0 ? Math.min(1, totalPagado / totalGenerado) : 0;
       const gananciaPiezas = Number(trabajo.ganancia_piezas || redondearDinero((ventaPiezas - inversionPiezas) + taxPiezas6));
 
-      total.inversionPiezas += inversionPiezas;
-      total.ventaPiezas += ventaPiezas;
-      total.taxPiezas6 += taxPiezas6;
-      total.cargoGeneral4 += cargoGeneral4;
-      total.gananciaPiezas += gananciaPiezas;
-      total.manoObra += manoObra;
-      total.impuestos += taxPiezas6 + cargoGeneral4;
-      total.totalCobrado += totalGenerado;
-      total.gananciaAprox += totalGenerado - inversionPiezas;
+      // Para que el Dashboard refleje dinero real cobrado, los totales financieros se prorratean
+      // cuando un trabajo tiene pagos parciales. Los cobros por método siempre salen de pagos_detalle.
+      total.inversionPiezas += redondearDinero(inversionPiezas * proporcionPagada);
+      total.ventaPiezas += redondearDinero(ventaPiezas * proporcionPagada);
+      total.taxPiezas6 += redondearDinero(taxPiezas6 * proporcionPagada);
+      total.cargoGeneral4 += redondearDinero(cargoGeneral4 * proporcionPagada);
+      total.gananciaPiezas += redondearDinero(gananciaPiezas * proporcionPagada);
+      total.manoObra += redondearDinero(manoObra * proporcionPagada);
+      total.impuestos += redondearDinero((taxPiezas6 + cargoGeneral4) * proporcionPagada);
+      total.totalCobrado += redondearDinero(totalPagado);
+      total.gananciaAprox += redondearDinero((totalGenerado - inversionPiezas) * proporcionPagada);
 
-      const metodo = String(trabajo.metodo_pago || "No registrado").trim() || "No registrado";
-      total.cobrosPorMetodo[metodo] = Number(total.cobrosPorMetodo[metodo] || 0) + totalGenerado;
+      Object.entries(pagosPorMetodoTrabajo(trabajo)).forEach(([metodo, monto]) => {
+        total.cobrosPorMetodo[metodo] = redondearDinero(Number(total.cobrosPorMetodo[metodo] || 0) + Number(monto || 0));
+      });
 
       return total;
     }, totalesVacios());
@@ -427,7 +530,17 @@ function Dashboard() {
       .from("trabajos_mecanicos")
       .update({
         pago_recibido: true,
-        metodo_pago: metodoPago,
+        metodo_pago: normalizarMetodoPago(metodoPago),
+        pagos_detalle: [
+          {
+            id: `${Date.now()}-dashboard-pago`,
+            metodo: normalizarMetodoPago(metodoPago),
+            monto: totalTrabajo,
+            nota: "Marcado como cobrado desde Dashboard"
+          }
+        ],
+        total_pagado: totalTrabajo,
+        saldo_pendiente: 0,
         fecha_pago: new Date().toISOString()
       })
       .eq("id", trabajo.id);
@@ -454,10 +567,14 @@ function Dashboard() {
 
     setRefrescando(true);
 
+    const totalTrabajo = calcularTotalTrabajoMecanico(trabajo);
+
     const { error } = await supabase
       .from("trabajos_mecanicos")
       .update({
         pago_recibido: false,
+        total_pagado: totalPagadoTrabajo(trabajo),
+        saldo_pendiente: saldoPendienteTrabajo({ ...trabajo, saldo_pendiente: totalTrabajo - totalPagadoTrabajo(trabajo) }),
         fecha_pago: null
       })
       .eq("id", trabajo.id);
@@ -587,9 +704,9 @@ function Dashboard() {
               <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
               <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
               <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{trabajo.metodo_pago || "Pendiente"}</span>
+              <span>{textoPagosDetalle(trabajo)}</span>
               <span style={pendingBadge}>🔴 Pendiente</span>
-              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))}</span>
+              <span>{dinero(saldoPendienteTrabajo(trabajo))}</span>
               <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
                 ✅ Pasar a cobrado
               </button>
@@ -603,7 +720,7 @@ function Dashboard() {
         {Object.entries(stats.semana.cobrosPorMetodo || {}).length === 0 ? (
           <Card title="Sin cobros registrados" value="$0.00" />
         ) : (
-          Object.entries(stats.semana.cobrosPorMetodo || {}).map(([metodo, total]) => (
+          Object.entries(stats.semana.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
             <Card
               key={`semana-${metodo}`}
               title={`💳 ${metodo}`}
@@ -646,9 +763,9 @@ function Dashboard() {
               <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
               <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
               <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{trabajo.metodo_pago || "Pendiente"}</span>
+              <span>{textoPagosDetalle(trabajo)}</span>
               <span style={pendingBadge}>🔴 Pendiente</span>
-              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))}</span>
+              <span>{dinero(saldoPendienteTrabajo(trabajo))}</span>
               <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
                 ✅ Pasar a cobrado
               </button>
@@ -662,7 +779,7 @@ function Dashboard() {
         {Object.entries(stats.mes.cobrosPorMetodo || {}).length === 0 ? (
           <Card title="Sin cobros registrados" value="$0.00" />
         ) : (
-          Object.entries(stats.mes.cobrosPorMetodo || {}).map(([metodo, total]) => (
+          Object.entries(stats.mes.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
             <Card
               key={`mes-${metodo}`}
               title={`💳 ${metodo}`}
@@ -685,12 +802,13 @@ function Dashboard() {
               <strong>{trabajo.numero_factura || "Trabajo mecánico"}</strong>
               <span>{trabajo.cliente_nombre || "Cliente manual"}</span>
               <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{trabajo.metodo_pago || "No registrado"}</span>
-              <span>{dinero(trabajo.costo_piezas)} inversión</span>
-              <span>{dinero(Number(trabajo.venta_piezas || 0) * 0.06)} tax piezas 6%</span>
-              <span>{dinero((Number(trabajo.venta_piezas || 0) + Number(trabajo.mano_obra || 0) + Number(trabajo.venta_piezas || 0) * 0.06) * 0.04)} cargo 4%</span>
-              <span>{dinero(trabajo.ganancia_piezas)} ganancia piezas</span>
-              <span>{dinero(calcularTotalTrabajoMecanico(trabajo))} total</span>
+              <span>{textoPagosDetalle(trabajo)}</span>
+              <span>Cash {dinero(montoMetodoTrabajo(trabajo, "Cash"))}</span>
+              <span>Zelle {dinero(montoMetodoTrabajo(trabajo, "Zelle"))}</span>
+              <span>Card {dinero(montoMetodoTrabajo(trabajo, "Debit Card") + montoMetodoTrabajo(trabajo, "Credit Card"))}</span>
+              <span>Financ. {dinero(montoMetodoTrabajo(trabajo, "Financiamiento"))}</span>
+              <span>Otros {dinero(montoMetodoTrabajo(trabajo, "Cash App") + montoMetodoTrabajo(trabajo, "Apple Pay") + montoMetodoTrabajo(trabajo, "Check") + montoMetodoTrabajo(trabajo, "Otro"))}</span>
+              <span>{dinero(totalPagadoTrabajo(trabajo))} pagado / {dinero(saldoPendienteTrabajo(trabajo))} pendiente</span>
               <button onClick={() => marcarTrabajoComoPendiente(trabajo)} style={markPendingButton}>
                 ⏳ Pasar a pendiente
               </button>
@@ -725,9 +843,9 @@ const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borde
 const cardTitleStyle = { color: "white", fontSize: "20px", margin: 0, marginBottom: "10px" };
 const numberStyle = { fontSize: "30px", fontWeight: "bold", color: "#f59e0b", margin: 0 };
 const cardSubtitleStyle = { color: "#d1d5db", fontSize: "13px", margin: "8px 0 0 0", lineHeight: "1.35" };
-const tableBox = { background: "rgba(31, 41, 55, 0.95)", borderRadius: "12px", border: "1px solid #374151", overflow: "hidden" };
-const rowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
-const pendingRowStyle = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr 1fr 1fr", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white" };
+const tableBox = { background: "rgba(31, 41, 55, 0.95)", borderRadius: "12px", border: "1px solid #374151", overflowX: "auto", overflowY: "hidden" };
+const rowStyle = { display: "grid", gridTemplateColumns: "130px 140px 130px 260px 110px 110px 110px 130px 120px 180px 140px", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white", minWidth: "1650px" };
+const pendingRowStyle = { display: "grid", gridTemplateColumns: "140px 150px 140px 260px 120px 130px 150px", gap: "10px", padding: "14px", borderBottom: "1px solid #374151", alignItems: "center", color: "white", minWidth: "1090px" };
 const markPaidButton = { padding: "10px 12px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const markPendingButton = { padding: "10px 12px", background: "#d97706", color: "#111827", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const pendingBadge = { background: "#7f1d1d", color: "white", padding: "6px 10px", borderRadius: "999px", fontWeight: "bold", textAlign: "center" };

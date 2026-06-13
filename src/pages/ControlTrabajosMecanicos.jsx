@@ -164,6 +164,24 @@ export default function ControlTrabajosMecanicos() {
     { value: "Pendiente", label: "⏳ Pendiente" }
   ];
 
+  const normalizarMetodoPago = (metodoValor) => {
+    const texto = String(metodoValor || "").trim();
+    const clave = texto.toLowerCase();
+
+    if (!clave || clave === "pendiente" || clave === "no registrado") return "";
+    if (clave === "cash" || clave === "efectivo") return "Cash";
+    if (clave === "zelle") return "Zelle";
+    if (clave === "debit card" || clave === "debit" || clave === "tarjeta debito" || clave === "tarjeta de debito") return "Debit Card";
+    if (clave === "credit card" || clave === "credit" || clave === "tarjeta credito" || clave === "tarjeta de credito") return "Credit Card";
+    if (clave === "cash app" || clave === "cashapp") return "Cash App";
+    if (clave === "apple pay" || clave === "applepay") return "Apple Pay";
+    if (clave === "check" || clave === "cheque") return "Check";
+    if (clave === "financiamiento" || clave === "financing" || clave === "finance") return "Financiamiento";
+    if (clave === "otro" || clave === "other") return "Otro";
+
+    return texto;
+  };
+
   const parsearPagosDetalle = (valor) => {
     if (Array.isArray(valor)) return valor;
     if (!valor) return [];
@@ -178,7 +196,7 @@ export default function ControlTrabajosMecanicos() {
 
   const normalizarPagoDetalle = (pago, index = 0) => ({
     id: pago.id || `${Date.now()}-pago-${index}`,
-    metodo: String(pago.metodo || pago.metodo_pago || "").trim(),
+    metodo: normalizarMetodoPago(pago.metodo || pago.metodo_pago),
     monto: Number(pago.monto || pago.amount || 0),
     nota: String(pago.nota || "").trim()
   });
@@ -1570,7 +1588,7 @@ export default function ControlTrabajosMecanicos() {
 
     if (metodoTexto === null) return;
 
-    const metodoPago = String(metodoTexto || "").trim();
+    const metodoPago = normalizarMetodoPago(metodoTexto);
 
     if (!metodoPago) {
       alert("Selecciona o escribe el método de pago antes de finalizar el trabajo.");
