@@ -59,6 +59,7 @@ export default function ControlTrabajosMecanicos() {
   const [cargando, setCargando] = useState(true);
   const [tick, setTick] = useState(Date.now());
   const [trabajoEditando, setTrabajoEditando] = useState(null);
+  const [soloEditandoPago, setSoloEditandoPago] = useState(false);
   const [resultadoDiagnosticoDraft, setResultadoDiagnosticoDraft] = useState({});
   const [busqueda, setBusqueda] = useState("");
   const [vistaTrabajos, setVistaTrabajos] = useState("activos");
@@ -180,6 +181,11 @@ export default function ControlTrabajosMecanicos() {
     if (clave === "otro" || clave === "other") return "Otro";
 
     return texto;
+  };
+
+  const metodoPagoEsCombinado = (metodoValor) => {
+    const texto = String(metodoValor || "").trim();
+    return texto.includes("+") || texto.includes(",") || texto.toLowerCase().includes(" y ");
   };
 
   const parsearPagosDetalle = (valor) => {
@@ -1428,8 +1434,9 @@ export default function ControlTrabajosMecanicos() {
     await cargarDatos();
   };
 
-  const abrirEdicionContabilidad = (trabajo) => {
+  const abrirEdicionContabilidad = (trabajo, soloPagos = false) => {
     setTrabajoEditando(trabajo);
+    setSoloEditandoPago(Boolean(soloPagos));
     setEditForm({
       cliente_nombre: trabajo.cliente_nombre || "",
       vehiculo: trabajo.vehiculo || "",
@@ -1452,6 +1459,7 @@ export default function ControlTrabajosMecanicos() {
 
   const cancelarEdicion = () => {
     setTrabajoEditando(null);
+    setSoloEditandoPago(false);
     setEditForm(editBase);
   };
 
@@ -1474,6 +1482,41 @@ export default function ControlTrabajosMecanicos() {
       reparacionMinutos < 0
     ) {
       alert("Uno de los valores de contabilidad o tiempo no es válido.");
+      return;
+    }
+
+    if (soloEditandoPago) {
+      const totalTrabajo = calcularTotalTrabajoCliente(trabajoEditando);
+      const pagosDetalleLimpios = limpiarPagosDetalle(editForm.pagos_detalle);
+      const totalPagado = totalPagosDetalle(pagosDetalleLimpios);
+      const saldoPendiente = redondearDinero(Math.max(0, totalTrabajo - totalPagado));
+      const pagoRecibidoFinal = totalTrabajo > 0 && totalPagado >= totalTrabajo - 0.009;
+      const metodoResumen = resumenMetodoPago(pagosDetalleLimpios, editForm.metodo_pago) || null;
+
+      const updatePago = {
+        metodo_pago: metodoResumen,
+        pagos_detalle: pagosDetalleLimpios,
+        total_pagado: totalPagado,
+        saldo_pendiente: saldoPendiente,
+        pago_recibido: pagoRecibidoFinal,
+        fecha_pago: pagoRecibidoFinal ? (trabajoEditando.fecha_pago || new Date().toISOString()) : null,
+        notas: editForm.notas.trim() || trabajoEditando.notas || null
+      };
+
+      const { error } = await supabase
+        .from("trabajos_mecanicos")
+        .update(updatePago)
+        .eq("id", trabajoEditando.id);
+
+      if (error) {
+        console.log(error);
+        alert(JSON.stringify(error, null, 2));
+        return;
+      }
+
+      alert("Pagos ajustados correctamente sin cambiar factura, piezas, mano de obra ni comisión.");
+      cancelarEdicion();
+      await cargarDatos();
       return;
     }
 
@@ -3380,7 +3423,12 @@ export default function ControlTrabajosMecanicos() {
 
       {trabajoEditando && (
         <div style={editBox}>
-          <h2 style={{ color: "#f59e0b", marginTop: 0 }}>✏️ Editar trabajo / contabilidad</h2>
+          <h2 style={{ color: "#f59e0b", marginTop: 0 }}>{soloEditandoPago ? "💳 Ajustar pagos del trabajo finalizado" : "✏️ Editar trabajo / contabilidad"}</h2>
+          {soloEditandoPago && (
+            <div style={paymentOnlyNotice}>
+              Solo se guardarán los pagos, total pagado, saldo pendiente, estado del pago y notas. No se modifican factura, piezas, mano de obra, tiempos, mecánico ni comisiones.
+            </div>
+          )}
           <p><strong>Origen:</strong> {mostrarOrigenTexto(trabajoEditando)}</p>
           <p><strong>Mecánico:</strong> {trabajoEditando.mecanico_nombre}</p>
 
@@ -3912,13 +3960,17 @@ export default function ControlTrabajosMecanicos() {
               <p><strong>Cargo general 4%:</strong> {dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).cargoGeneral4)}</p>
               <p><strong>Ganancia piezas:</strong> {dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).gananciaPiezas)}</p>
               <p><strong>Total generado:</strong> <span style={statusBadge}>{dinero(calcularTotalesContabilidad(trabajo.costo_piezas, trabajo.venta_piezas, trabajo.mano_obra).totalGenerado)}</span></p>
-              <p><strong>💳 Método de pago:</strong> {trabajo.metodo_pago || "No registrado"}</p>
+              <p><strong>💳 Método de pago:</strong> {resumenMetodoPago(trabajo.pagos_detalle, trabajo.metodo_pago) || "No registrado"}</p>
               <p><strong>✅ Pago recibido:</strong> {trabajo.pago_recibido ? "Sí" : "No"}</p>
               <p><strong>🕒 Fecha de pago:</strong> {formatearFecha(trabajo.fecha_pago)}</p>
 
               <p><strong>Notas:</strong><br />{trabajo.notas || "Sin notas"}</p>
 
               <button onClick={() => abrirEdicionContabilidad(trabajo)} style={editButton}>✏️ Editar trabajo / contabilidad</button>
+
+              {!esTrabajoActivo(trabajo) && (
+                <button onClick={() => abrirEdicionContabilidad(trabajo, true)} style={paymentAdjustButton}>💳 Ajustar pagos</button>
+              )}
 
               {esTrabajoActivo(trabajo) && (
                 <button onClick={() => finalizarTrabajo(trabajo)} style={finishButton}>⏹ Finalizar Trabajo</button>
@@ -4206,6 +4258,29 @@ const paymentsReadBox = {
   padding: "10px",
   marginTop: "10px",
   marginBottom: "10px"
+};
+
+
+const paymentOnlyNotice = {
+  background: "#111827",
+  border: "1px solid #f59e0b",
+  borderRadius: "10px",
+  padding: "12px",
+  color: "#fde68a",
+  marginBottom: "12px",
+  fontWeight: "bold"
+};
+
+const paymentAdjustButton = {
+  background: "#0891b2",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  padding: "10px 12px",
+  fontWeight: "bold",
+  cursor: "pointer",
+  marginTop: "8px",
+  marginRight: "8px"
 };
 
 const fileInput = { marginTop: "15px", color: "white" };

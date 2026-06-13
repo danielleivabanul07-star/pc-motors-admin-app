@@ -89,6 +89,11 @@ function Dashboard() {
     return texto;
   };
 
+  const metodoPagoEsCombinado = (metodoValor) => {
+    const texto = String(metodoValor || "").trim();
+    return texto.includes("+") || texto.includes(",") || texto.toLowerCase().includes(" y ");
+  };
+
   const parsearPagosDetalle = (valor) => {
     if (Array.isArray(valor)) return valor;
     if (!valor) return [];
@@ -122,8 +127,13 @@ function Dashboard() {
     const pagos = limpiarPagosDetalle(trabajo?.pagos_detalle);
     if (pagos.length > 0) return pagos;
 
-    const metodo = normalizarMetodoPago(trabajo?.metodo_pago);
+    const metodoOriginal = String(trabajo?.metodo_pago || "").trim();
+    const metodo = normalizarMetodoPago(metodoOriginal);
     const total = calcularTotalTrabajoMecanico(trabajo || {});
+
+    // Si el método viejo viene combinado como "Cash + Zelle", no lo convertimos en una categoría falsa.
+    // Debe ajustarse con pagos_detalle para repartir los montos reales por método.
+    if (metodoPagoEsCombinado(metodoOriginal)) return [];
 
     if (metodo && trabajo?.pago_recibido === true && total > 0) {
       return [
@@ -167,7 +177,10 @@ function Dashboard() {
 
   const textoPagosDetalle = (trabajo) => {
     const pagos = pagosDetalleTrabajo(trabajo);
-    if (pagos.length === 0) return trabajo?.pago_recibido ? (trabajo?.metodo_pago || "No registrado") : "Pendiente";
+    if (pagos.length === 0) {
+      if (trabajo?.pago_recibido && metodoPagoEsCombinado(trabajo?.metodo_pago)) return "Sin desglose: ajustar pagos";
+      return trabajo?.pago_recibido ? (normalizarMetodoPago(trabajo?.metodo_pago) || "No registrado") : "Pendiente";
+    }
     return pagos.map((pago) => `${pago.metodo} ${dinero(pago.monto)}`).join(" + ");
   };
 
