@@ -19,6 +19,15 @@ function Dashboard() {
 
   const [ocultarTrabajosSemana, setOcultarTrabajosSemana] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
+  const [busquedaTrabajo, setBusquedaTrabajo] = useState("");
+  const [seccionesAbiertas, setSeccionesAbiertas] = useState({
+    resumen: true,
+    metodos: true,
+    pendientes: false,
+    semana: false,
+    mes: false,
+    trabajos: false
+  });
 
   useEffect(() => {
     cargarDashboard(false);
@@ -38,6 +47,13 @@ function Dashboard() {
       supabase.removeChannel(canal);
     };
   }, []);
+
+  const alternarSeccion = (nombre) => {
+    setSeccionesAbiertas((prev) => ({
+      ...prev,
+      [nombre]: !prev[nombre]
+    }));
+  };
 
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
 
@@ -603,6 +619,95 @@ function Dashboard() {
     await cargarDashboard(false);
   };
 
+  const ajustarPagosDashboard = async (trabajo) => {
+    if (!trabajo?.id) return;
+
+    const totalTrabajo = calcularTotalTrabajoMecanico(trabajo);
+    const pagosActuales = pagosPorMetodoTrabajo(trabajo);
+
+    const nuevosPagos = [];
+    let cancelado = false;
+
+    for (const metodo of metodosPago) {
+      const valorActual = Number(pagosActuales[metodo] || 0);
+      const entrada = prompt(
+        `Ajustar pago para ${trabajo.cliente_nombre || "cliente"}\n\nMétodo: ${metodo}\nTotal factura: ${dinero(totalTrabajo)}\n\nEscribe el monto recibido por ${metodo}.\nDeja 0 si no aplica.`,
+        valorActual ? String(valorActual) : "0"
+      );
+
+      if (entrada === null) {
+        cancelado = true;
+        break;
+      }
+
+      const monto = Number(String(entrada).replace(",", "."));
+
+      if (!Number.isFinite(monto) || monto < 0) {
+        alert(`Monto no válido para ${metodo}.`);
+        return;
+      }
+
+      if (monto > 0) {
+        nuevosPagos.push({
+          id: `${Date.now()}-${metodo.replace(/\s+/g, "-").toLowerCase()}`,
+          metodo,
+          monto: redondearDinero(monto),
+          nota: "Ajustado desde Dashboard"
+        });
+      }
+    }
+
+    if (cancelado) return;
+
+    const totalPagado = redondearDinero(
+      nuevosPagos.reduce((total, pago) => total + Number(pago.monto || 0), 0)
+    );
+
+    if (totalPagado > totalTrabajo + 0.009) {
+      const continuar = confirm(
+        `El total pagado (${dinero(totalPagado)}) es mayor que el total de la factura (${dinero(totalTrabajo)}).\n\n¿Guardar de todas formas?`
+      );
+      if (!continuar) return;
+    }
+
+    const saldoPendiente = redondearDinero(Math.max(0, totalTrabajo - totalPagado));
+    const pagoRecibido = totalTrabajo > 0 && saldoPendiente <= 0.009;
+
+    const metodoResumen = nuevosPagos.length === 0
+      ? "Pendiente"
+      : [...new Set(nuevosPagos.map((pago) => pago.metodo))].join(" + ");
+
+    const confirmar = confirm(
+      `¿Guardar ajuste de pagos?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}\nTotal factura: ${dinero(totalTrabajo)}\nTotal pagado: ${dinero(totalPagado)}\nPendiente: ${dinero(saldoPendiente)}`
+    );
+
+    if (!confirmar) return;
+
+    setRefrescando(true);
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        metodo_pago: metodoResumen,
+        pagos_detalle: nuevosPagos,
+        total_pagado: totalPagado,
+        saldo_pendiente: saldoPendiente,
+        pago_recibido: pagoRecibido,
+        fecha_pago: pagoRecibido ? (trabajo.fecha_pago || new Date().toISOString()) : null
+      })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      setRefrescando(false);
+      return;
+    }
+
+    alert("Pagos ajustados correctamente.");
+    await cargarDashboard(false);
+  };
+
   const guardarReporte = async (tipo) => {
     const esSemanal = tipo === "semanal";
     const trabajos = esSemanal ? stats.trabajosSemana : stats.trabajosMes;
@@ -658,15 +763,30 @@ function Dashboard() {
     alert("Vista del Dashboard limpiada correctamente.");
   };
 
+  const trabajosFinalizadosVisibles = (stats.trabajosMecanicosSemana || []).filter((trabajo) => {
+    const texto = `${trabajo.numero_factura || ""} ${trabajo.cliente_nombre || ""} ${trabajo.mecanico_nombre || ""} ${trabajo.vehiculo || ""}`.toLowerCase();
+    return texto.includes(busquedaTrabajo.toLowerCase());
+  });
+
+  const trabajosPendientesSemanaVisibles = (stats.trabajosPendientesSemana || []).filter((trabajo) => {
+    const texto = `${trabajo.numero_factura || ""} ${trabajo.cliente_nombre || ""} ${trabajo.mecanico_nombre || ""} ${trabajo.vehiculo || ""}`.toLowerCase();
+    return texto.includes(busquedaTrabajo.toLowerCase());
+  });
+
+  const trabajosPendientesMesVisibles = (stats.trabajosPendientesMes || []).filter((trabajo) => {
+    const texto = `${trabajo.numero_factura || ""} ${trabajo.cliente_nombre || ""} ${trabajo.mecanico_nombre || ""} ${trabajo.vehiculo || ""}`.toLowerCase();
+    return texto.includes(busquedaTrabajo.toLowerCase());
+  });
+
   return (
     <div style={pageBox}>
       <h1 style={titleStyle}>📊 Dashboard Financiero</h1>
-      <p style={subtitleStyle}>Resumen de cobros reales, pagos pendientes, métodos de pago y cargos exactos.</p>
+      <p style={subtitleStyle}>Resumen limpio de cobros reales, pagos pendientes y métodos de pago.</p>
 
       <div style={actionsBox}>
         <button onClick={() => guardarReporte("semanal")} style={saveButton}>💾 Guardar Reporte Semanal</button>
         <button onClick={() => guardarReporte("mensual")} style={saveButton}>💾 Guardar Reporte Mensual</button>
-        <button onClick={limpiarVistaDashboard} style={cleanButton}>🧹 Limpiar Vista Dashboard</button>
+        <button onClick={limpiarVistaDashboard} style={cleanButton}>🧹 Limpiar Vista</button>
         <button
           onClick={() => cargarDashboard(true)}
           style={{ ...refreshButton, opacity: refrescando ? 0.7 : 1, cursor: refrescando ? "not-allowed" : "pointer" }}
@@ -676,162 +796,252 @@ function Dashboard() {
         </button>
       </div>
 
-      <div style={gridStyle}>
-        <Card title="👥 Clientes en proceso" value={stats.clientesActivos} />
-        <Card title="🚗 Vehículos en proceso" value={stats.vehiculosActivos} />
-        <Card title="📁 Clientes atendidos" value={stats.clientesAtendidos} />
-        <Card title="🛠 Trabajos activos" value={stats.trabajosActivos} />
-        <Card title="💰 Cobrado esta semana" value={dinero(stats.semana.totalCobrado)} />
-        <Card title="⏳ Pendiente de pago" value={dinero(stats.semana.pagosPendientes)} />
-      </div>
-
-      <h2 style={sectionTitle}>📅 Resumen de esta semana</h2>
-      <div style={gridStyle}>
-        <Card title="🧾 Inversión piezas" value={dinero(stats.semana.inversionPiezas)} />
-        <Card title="💵 Venta piezas" value={dinero(stats.semana.ventaPiezas)} />
-        <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.semana.taxPiezas6)} subtitle="6.00% sobre venta de piezas cobradas" />
-        <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.semana.cargoGeneral4)} subtitle="4.00% sobre piezas + mano de obra + tax piezas" />
-        <Card title="📈 Ganancia piezas" value={dinero(stats.semana.gananciaPiezas)} />
-        <Card title="🔧 Mano de obra" value={dinero(stats.semana.manoObra)} />
-        <Card title="💲 Total cobrado" value={dinero(stats.semana.totalCobrado)} />
-        <Card title="⏳ Pagos pendientes" value={dinero(stats.semana.pagosPendientes)} />
-        <Card title="✅ Ganancia aprox." value={dinero(stats.semana.gananciaAprox)} />
-      </div>
-
-      <h2 style={sectionTitle}>⏳ Dinero finalizado pendiente por cobrarse esta semana</h2>
-      <div style={gridStyle}>
-        <Card
-          title="Pendiente por cobrar"
-          value={dinero(stats.semana.pagosPendientes)}
-          subtitle="Trabajos finalizados donde pago_recibido todavía está en No"
-        />
-      </div>
-
-      <h2 style={sectionTitle}>🧾 Trabajos finalizados pendientes de pago esta semana</h2>
-      {(stats.trabajosPendientesSemana || []).length === 0 ? (
-        <div style={emptyStyle}>No hay pagos pendientes esta semana.</div>
-      ) : (
-        <div style={tableBox}>
-          {(stats.trabajosPendientesSemana || []).map((trabajo) => (
-            <div key={`pendiente-semana-${trabajo.id}`} style={pendingRowStyle}>
-              <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
-              <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
-              <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{textoPagosDetalle(trabajo)}</span>
-              <span style={pendingBadge}>🔴 Pendiente</span>
-              <span>{dinero(saldoPendienteTrabajo(trabajo))}</span>
-              <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
-                ✅ Pasar a cobrado
-              </button>
-            </div>
-          ))}
+      <Panel
+        titulo="📌 Resumen General"
+        abierto={seccionesAbiertas.resumen}
+        onToggle={() => alternarSeccion("resumen")}
+      >
+        <div style={gridStyle}>
+          <Card title="👥 Clientes en proceso" value={stats.clientesActivos} />
+          <Card title="🚗 Vehículos en proceso" value={stats.vehiculosActivos} />
+          <Card title="📁 Clientes atendidos" value={stats.clientesAtendidos} />
+          <Card title="🛠 Trabajos activos" value={stats.trabajosActivos} />
+          <Card title="💰 Cobrado esta semana" value={dinero(stats.semana.totalCobrado)} />
+          <Card title="⏳ Pendiente semana" value={dinero(stats.semana.pagosPendientes)} />
+          <Card title="💰 Cobrado este mes" value={dinero(stats.mes.totalCobrado)} />
+          <Card title="⏳ Pendiente mes" value={dinero(stats.mes.pagosPendientes)} />
         </div>
-      )}
+      </Panel>
 
-      <h2 style={sectionTitle}>💳 Cobros por método esta semana</h2>
-      <div style={gridStyle}>
-        {Object.entries(stats.semana.cobrosPorMetodo || {}).length === 0 ? (
-          <Card title="Sin cobros registrados" value="$0.00" />
+      <Panel
+        titulo="💳 Cobros por Método"
+        abierto={seccionesAbiertas.metodos}
+        onToggle={() => alternarSeccion("metodos")}
+      >
+        <h3 style={miniTitle}>Esta semana</h3>
+        <div style={gridStyle}>
+          {Object.entries(stats.semana.cobrosPorMetodo || {}).length === 0 ? (
+            <Card title="Sin cobros registrados" value="$0.00" />
+          ) : (
+            Object.entries(stats.semana.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
+              <Card
+                key={`semana-${metodo}`}
+                title={`💳 ${metodo}`}
+                value={dinero(total)}
+                subtitle={`${porcentaje(total, stats.semana.totalCobrado)} del total cobrado`}
+              />
+            ))
+          )}
+        </div>
+
+        <h3 style={miniTitle}>Este mes</h3>
+        <div style={gridStyle}>
+          {Object.entries(stats.mes.cobrosPorMetodo || {}).length === 0 ? (
+            <Card title="Sin cobros registrados" value="$0.00" />
+          ) : (
+            Object.entries(stats.mes.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
+              <Card
+                key={`mes-${metodo}`}
+                title={`💳 ${metodo}`}
+                value={dinero(total)}
+                subtitle={`${porcentaje(total, stats.mes.totalCobrado)} del total cobrado`}
+              />
+            ))
+          )}
+        </div>
+      </Panel>
+
+      <Panel
+        titulo="⏳ Pagos Pendientes"
+        abierto={seccionesAbiertas.pendientes}
+        onToggle={() => alternarSeccion("pendientes")}
+      >
+        <div style={gridStyle}>
+          <Card title="Pendiente esta semana" value={dinero(stats.semana.pagosPendientes)} />
+          <Card title="Pendiente este mes" value={dinero(stats.mes.pagosPendientes)} />
+        </div>
+
+        <h3 style={miniTitle}>Pendientes esta semana</h3>
+        {trabajosPendientesSemanaVisibles.length === 0 ? (
+          <div style={emptyStyle}>No hay pagos pendientes esta semana.</div>
         ) : (
-          Object.entries(stats.semana.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
-            <Card
-              key={`semana-${metodo}`}
-              title={`💳 ${metodo}`}
-              value={dinero(total)}
-              subtitle={`${porcentaje(total, stats.semana.totalCobrado)} del total cobrado`}
-            />
-          ))
+          <div style={compactListBox}>
+            {trabajosPendientesSemanaVisibles.map((trabajo) => (
+              <TrabajoCompacto
+                key={`pendiente-semana-${trabajo.id}`}
+                trabajo={trabajo}
+                dinero={dinero}
+                textoPagosDetalle={textoPagosDetalle}
+                totalPagadoTrabajo={totalPagadoTrabajo}
+                saldoPendienteTrabajo={saldoPendienteTrabajo}
+                montoMetodoTrabajo={montoMetodoTrabajo}
+                onAjustar={() => ajustarPagosDashboard(trabajo)}
+                onCobrado={() => marcarTrabajoComoCobrado(trabajo)}
+                onPendiente={() => marcarTrabajoComoPendiente(trabajo)}
+                pendiente
+              />
+            ))}
+          </div>
         )}
-      </div>
 
-      <h2 style={sectionTitle}>🗓 Resumen de este mes</h2>
-      <div style={gridStyle}>
-        <Card title="🧾 Inversión piezas" value={dinero(stats.mes.inversionPiezas)} />
-        <Card title="💵 Venta piezas" value={dinero(stats.mes.ventaPiezas)} />
-        <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.mes.taxPiezas6)} subtitle="6.00% sobre venta de piezas cobradas" />
-        <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.mes.cargoGeneral4)} subtitle="4.00% sobre piezas + mano de obra + tax piezas" />
-        <Card title="📈 Ganancia piezas" value={dinero(stats.mes.gananciaPiezas)} />
-        <Card title="🔧 Mano de obra" value={dinero(stats.mes.manoObra)} />
-        <Card title="💲 Total cobrado" value={dinero(stats.mes.totalCobrado)} />
-        <Card title="⏳ Pagos pendientes" value={dinero(stats.mes.pagosPendientes)} />
-        <Card title="✅ Ganancia aprox." value={dinero(stats.mes.gananciaAprox)} />
-      </div>
-
-      <h2 style={sectionTitle}>⏳ Dinero finalizado pendiente por cobrarse este mes</h2>
-      <div style={gridStyle}>
-        <Card
-          title="Pendiente por cobrar"
-          value={dinero(stats.mes.pagosPendientes)}
-          subtitle="Trabajos finalizados donde pago_recibido todavía está en No"
-        />
-      </div>
-
-      <h2 style={sectionTitle}>🧾 Trabajos finalizados pendientes de pago este mes</h2>
-      {(stats.trabajosPendientesMes || []).length === 0 ? (
-        <div style={emptyStyle}>No hay pagos pendientes este mes.</div>
-      ) : (
-        <div style={tableBox}>
-          {(stats.trabajosPendientesMes || []).map((trabajo) => (
-            <div key={`pendiente-mes-${trabajo.id}`} style={pendingRowStyle}>
-              <strong>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
-              <span>{trabajo.cliente_nombre || "Cliente no registrado"}</span>
-              <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{textoPagosDetalle(trabajo)}</span>
-              <span style={pendingBadge}>🔴 Pendiente</span>
-              <span>{dinero(saldoPendienteTrabajo(trabajo))}</span>
-              <button onClick={() => marcarTrabajoComoCobrado(trabajo)} style={markPaidButton}>
-                ✅ Pasar a cobrado
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <h2 style={sectionTitle}>💳 Cobros por método este mes</h2>
-      <div style={gridStyle}>
-        {Object.entries(stats.mes.cobrosPorMetodo || {}).length === 0 ? (
-          <Card title="Sin cobros registrados" value="$0.00" />
+        <h3 style={miniTitle}>Pendientes este mes</h3>
+        {trabajosPendientesMesVisibles.length === 0 ? (
+          <div style={emptyStyle}>No hay pagos pendientes este mes.</div>
         ) : (
-          Object.entries(stats.mes.cobrosPorMetodo || {}).sort(([a], [b]) => a.localeCompare(b)).map(([metodo, total]) => (
-            <Card
-              key={`mes-${metodo}`}
-              title={`💳 ${metodo}`}
-              value={dinero(total)}
-              subtitle={`${porcentaje(total, stats.mes.totalCobrado)} del total cobrado`}
-            />
-          ))
+          <div style={compactListBox}>
+            {trabajosPendientesMesVisibles.map((trabajo) => (
+              <TrabajoCompacto
+                key={`pendiente-mes-${trabajo.id}`}
+                trabajo={trabajo}
+                dinero={dinero}
+                textoPagosDetalle={textoPagosDetalle}
+                totalPagadoTrabajo={totalPagadoTrabajo}
+                saldoPendienteTrabajo={saldoPendienteTrabajo}
+                montoMetodoTrabajo={montoMetodoTrabajo}
+                onAjustar={() => ajustarPagosDashboard(trabajo)}
+                onCobrado={() => marcarTrabajoComoCobrado(trabajo)}
+                onPendiente={() => marcarTrabajoComoPendiente(trabajo)}
+                pendiente
+              />
+            ))}
+          </div>
         )}
-      </div>
+      </Panel>
 
-      <h2 style={sectionTitle}>🔎 Trabajos de esta semana</h2>
-      {ocultarTrabajosSemana ? (
-        <div style={emptyStyle}>La vista fue limpiada. Usa “Refrescar” para volver a mostrar los datos.</div>
-      ) : stats.trabajosSemana.length + stats.trabajosMecanicosSemana.length === 0 ? (
-        <div style={emptyStyle}>No hay trabajos esta semana.</div>
-      ) : (
-        <div style={tableBox}>
-          {stats.trabajosMecanicosSemana.map((trabajo) => (
-            <div key={`mecanico-${trabajo.id}`} style={rowStyle}>
-              <strong>{trabajo.numero_factura || "Trabajo mecánico"}</strong>
-              <span>{trabajo.cliente_nombre || "Cliente manual"}</span>
-              <span>{trabajo.mecanico_nombre || "Sin mecánico"}</span>
-              <span>{textoPagosDetalle(trabajo)}</span>
-              <span>Cash {dinero(montoMetodoTrabajo(trabajo, "Cash"))}</span>
-              <span>Zelle {dinero(montoMetodoTrabajo(trabajo, "Zelle"))}</span>
-              <span>Card {dinero(montoMetodoTrabajo(trabajo, "Debit Card") + montoMetodoTrabajo(trabajo, "Credit Card"))}</span>
-              <span>Financ. {dinero(montoMetodoTrabajo(trabajo, "Financiamiento"))}</span>
-              <span>Otros {dinero(montoMetodoTrabajo(trabajo, "Cash App") + montoMetodoTrabajo(trabajo, "Apple Pay") + montoMetodoTrabajo(trabajo, "Check") + montoMetodoTrabajo(trabajo, "Otro"))}</span>
-              <span>{dinero(totalPagadoTrabajo(trabajo))} pagado / {dinero(saldoPendienteTrabajo(trabajo))} pendiente</span>
-              <button onClick={() => marcarTrabajoComoPendiente(trabajo)} style={markPendingButton}>
-                ⏳ Pasar a pendiente
-              </button>
-            </div>
-          ))}
+      <Panel
+        titulo="📅 Resumen Semanal Detallado"
+        abierto={seccionesAbiertas.semana}
+        onToggle={() => alternarSeccion("semana")}
+      >
+        <div style={gridStyle}>
+          <Card title="🧾 Inversión piezas" value={dinero(stats.semana.inversionPiezas)} />
+          <Card title="💵 Venta piezas" value={dinero(stats.semana.ventaPiezas)} />
+          <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.semana.taxPiezas6)} subtitle="Uso interno" />
+          <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.semana.cargoGeneral4)} subtitle="Uso interno" />
+          <Card title="📈 Ganancia piezas" value={dinero(stats.semana.gananciaPiezas)} />
+          <Card title="🔧 Mano de obra" value={dinero(stats.semana.manoObra)} />
+          <Card title="💲 Total cobrado" value={dinero(stats.semana.totalCobrado)} />
+          <Card title="✅ Ganancia aprox." value={dinero(stats.semana.gananciaAprox)} />
         </div>
-      )}
+      </Panel>
+
+      <Panel
+        titulo="🗓 Resumen Mensual Detallado"
+        abierto={seccionesAbiertas.mes}
+        onToggle={() => alternarSeccion("mes")}
+      >
+        <div style={gridStyle}>
+          <Card title="🧾 Inversión piezas" value={dinero(stats.mes.inversionPiezas)} />
+          <Card title="💵 Venta piezas" value={dinero(stats.mes.ventaPiezas)} />
+          <Card title="🧾 Tax piezas exacto 6.00%" value={dinero(stats.mes.taxPiezas6)} subtitle="Uso interno" />
+          <Card title="💳 Cargo general exacto 4.00%" value={dinero(stats.mes.cargoGeneral4)} subtitle="Uso interno" />
+          <Card title="📈 Ganancia piezas" value={dinero(stats.mes.gananciaPiezas)} />
+          <Card title="🔧 Mano de obra" value={dinero(stats.mes.manoObra)} />
+          <Card title="💲 Total cobrado" value={dinero(stats.mes.totalCobrado)} />
+          <Card title="✅ Ganancia aprox." value={dinero(stats.mes.gananciaAprox)} />
+        </div>
+      </Panel>
+
+      <Panel
+        titulo="🚗 Trabajos Finalizados / Ajustar Pagos"
+        abierto={seccionesAbiertas.trabajos}
+        onToggle={() => alternarSeccion("trabajos")}
+      >
+        <input
+          placeholder="Buscar por cliente, factura, mecánico o vehículo..."
+          value={busquedaTrabajo}
+          onChange={(e) => setBusquedaTrabajo(e.target.value)}
+          style={searchInput}
+        />
+
+        {ocultarTrabajosSemana ? (
+          <div style={emptyStyle}>La vista fue limpiada. Usa “Refrescar” para volver a mostrar los datos.</div>
+        ) : trabajosFinalizadosVisibles.length === 0 ? (
+          <div style={emptyStyle}>No hay trabajos finalizados visibles esta semana.</div>
+        ) : (
+          <div style={compactListBox}>
+            {trabajosFinalizadosVisibles.map((trabajo) => (
+              <TrabajoCompacto
+                key={`mecanico-${trabajo.id}`}
+                trabajo={trabajo}
+                dinero={dinero}
+                textoPagosDetalle={textoPagosDetalle}
+                totalPagadoTrabajo={totalPagadoTrabajo}
+                saldoPendienteTrabajo={saldoPendienteTrabajo}
+                montoMetodoTrabajo={montoMetodoTrabajo}
+                onAjustar={() => ajustarPagosDashboard(trabajo)}
+                onCobrado={() => marcarTrabajoComoCobrado(trabajo)}
+                onPendiente={() => marcarTrabajoComoPendiente(trabajo)}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }
+
+
+
+function Panel({ titulo, abierto, onToggle, children }) {
+  return (
+    <section style={panelStyle}>
+      <button onClick={onToggle} style={panelHeaderStyle}>
+        <span>{titulo}</span>
+        <span>{abierto ? "▲ Ocultar" : "▼ Ver"}</span>
+      </button>
+      {abierto && <div style={panelBodyStyle}>{children}</div>}
+    </section>
+  );
+}
+
+function TrabajoCompacto({
+  trabajo,
+  dinero,
+  textoPagosDetalle,
+  totalPagadoTrabajo,
+  saldoPendienteTrabajo,
+  montoMetodoTrabajo,
+  onAjustar,
+  onCobrado,
+  onPendiente,
+  pendiente = false
+}) {
+  return (
+    <div style={compactJobCard}>
+      <div>
+        <strong style={{ color: "#f59e0b" }}>{trabajo.numero_factura || "Trabajo finalizado"}</strong>
+        <p style={compactText}>{trabajo.cliente_nombre || "Cliente no registrado"}</p>
+        <p style={compactText}>{trabajo.mecanico_nombre || "Sin mecánico"}</p>
+      </div>
+
+      <div>
+        <p style={compactText}><strong>Pagos:</strong> {textoPagosDetalle(trabajo)}</p>
+        <p style={compactText}>
+          Pagado: <strong>{dinero(totalPagadoTrabajo(trabajo))}</strong> /
+          Pendiente: <strong>{dinero(saldoPendienteTrabajo(trabajo))}</strong>
+        </p>
+      </div>
+
+      <div style={paymentMiniGrid}>
+        <span>Cash {dinero(montoMetodoTrabajo(trabajo, "Cash"))}</span>
+        <span>Zelle {dinero(montoMetodoTrabajo(trabajo, "Zelle"))}</span>
+        <span>Financ. {dinero(montoMetodoTrabajo(trabajo, "Financiamiento"))}</span>
+        <span>Card {dinero(montoMetodoTrabajo(trabajo, "Debit Card") + montoMetodoTrabajo(trabajo, "Credit Card"))}</span>
+      </div>
+
+      <div style={compactActions}>
+        <button onClick={onAjustar} style={adjustButton}>✏️ Ajustar pagos</button>
+        {pendiente ? (
+          <button onClick={onCobrado} style={markPaidButton}>✅ Cobrado</button>
+        ) : (
+          <button onClick={onPendiente} style={markPendingButton}>⏳ Pendiente</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function Card({ title, value, subtitle }) {
   return (
@@ -851,7 +1061,7 @@ const saveButton = { padding: "12px 16px", background: "#16a34a", color: "white"
 const cleanButton = { padding: "12px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const refreshButton = { padding: "12px 16px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const sectionTitle = { color: "#f59e0b", marginTop: "35px", marginBottom: "10px" };
-const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: "20px", marginTop: "20px" };
+const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: "16px", marginTop: "14px" };
 const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #f59e0b", boxShadow: "0 10px 25px rgba(0,0,0,0.25)" };
 const cardTitleStyle = { color: "white", fontSize: "20px", margin: 0, marginBottom: "10px" };
 const numberStyle = { fontSize: "30px", fontWeight: "bold", color: "#f59e0b", margin: 0 };
@@ -864,5 +1074,95 @@ const markPendingButton = { padding: "10px 12px", background: "#d97706", color: 
 const pendingBadge = { background: "#7f1d1d", color: "white", padding: "6px 10px", borderRadius: "999px", fontWeight: "bold", textAlign: "center" };
 const paidBadge = { background: "#166534", color: "white", padding: "6px 10px", borderRadius: "999px", fontWeight: "bold", textAlign: "center" };
 const emptyStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #374151", color: "white" };
+
+
+const panelStyle = {
+  background: "rgba(15, 23, 42, 0.92)",
+  border: "1px solid #374151",
+  borderRadius: "14px",
+  marginTop: "18px",
+  overflow: "hidden"
+};
+
+const panelHeaderStyle = {
+  width: "100%",
+  background: "rgba(31, 41, 55, 0.98)",
+  color: "#f59e0b",
+  border: "none",
+  padding: "16px 18px",
+  fontSize: "20px",
+  fontWeight: "bold",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  cursor: "pointer",
+  textAlign: "left"
+};
+
+const panelBodyStyle = {
+  padding: "18px"
+};
+
+const miniTitle = {
+  color: "#f59e0b",
+  marginTop: "18px",
+  marginBottom: "8px"
+};
+
+const searchInput = {
+  width: "100%",
+  padding: "13px",
+  borderRadius: "10px",
+  border: "1px solid #374151",
+  background: "#111827",
+  color: "white",
+  marginBottom: "14px",
+  fontSize: "15px"
+};
+
+const compactListBox = {
+  display: "grid",
+  gap: "12px"
+};
+
+const compactJobCard = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1.4fr 1.2fr auto",
+  gap: "14px",
+  background: "rgba(31, 41, 55, 0.95)",
+  border: "1px solid #374151",
+  borderRadius: "12px",
+  padding: "14px",
+  alignItems: "center"
+};
+
+const compactText = {
+  margin: "4px 0",
+  color: "#d1d5db"
+};
+
+const paymentMiniGrid = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "6px",
+  color: "white",
+  fontSize: "13px"
+};
+
+const compactActions = {
+  display: "grid",
+  gap: "8px"
+};
+
+const adjustButton = {
+  padding: "10px 12px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
 
 export default Dashboard;

@@ -7,6 +7,9 @@ function Historial() {
   const [facturasMap, setFacturasMap] = useState({});
   const [busqueda, setBusqueda] = useState("");
   const [cargando, setCargando] = useState(true);
+  const [trabajoAjustandoPago, setTrabajoAjustandoPago] = useState(null);
+  const [pagosDraft, setPagosDraft] = useState([]);
+  const [notaPagoDraft, setNotaPagoDraft] = useState("");
 
   useEffect(() => {
     cargarHistorial();
@@ -61,6 +64,212 @@ function Historial() {
       gananciaPiezas: Number(trabajo.ganancia_piezas || 0) || gananciaPiezas,
       gananciaAprox
     };
+  };
+
+
+  const metodosPago = [
+    "Cash",
+    "Zelle",
+    "Debit Card",
+    "Credit Card",
+    "Cash App",
+    "Apple Pay",
+    "Check",
+    "Financiamiento",
+    "Otro"
+  ];
+
+  const normalizarMetodoPago = (metodoValor) => {
+    const texto = String(metodoValor || "").trim();
+    const clave = texto.toLowerCase();
+
+    if (!clave || clave === "pendiente" || clave === "no registrado") return "";
+    if (clave === "cash" || clave === "efectivo") return "Cash";
+    if (clave === "zelle") return "Zelle";
+    if (clave === "debit card" || clave === "debit" || clave === "tarjeta debito" || clave === "tarjeta de debito") return "Debit Card";
+    if (clave === "credit card" || clave === "credit" || clave === "tarjeta credito" || clave === "tarjeta de credito") return "Credit Card";
+    if (clave === "cash app" || clave === "cashapp") return "Cash App";
+    if (clave === "apple pay" || clave === "applepay") return "Apple Pay";
+    if (clave === "check" || clave === "cheque") return "Check";
+    if (clave === "financiamiento" || clave === "financing" || clave === "finance") return "Financiamiento";
+    if (clave === "otro" || clave === "other") return "Otro";
+
+    return texto;
+  };
+
+  const parsearPagosDetalle = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const limpiarPagosDetalle = (pagosValor) => {
+    return parsearPagosDetalle(pagosValor)
+      .map((pago, index) => ({
+        id: pago.id || `${Date.now()}-pago-${index}`,
+        metodo: normalizarMetodoPago(pago.metodo || pago.metodo_pago),
+        monto: redondearDinero(Number(pago.monto || pago.amount || 0)),
+        nota: String(pago.nota || "").trim()
+      }))
+      .filter((pago) => pago.metodo && pago.monto > 0);
+  };
+
+  const totalPagosDetalle = (pagosValor) => {
+    return redondearDinero(
+      limpiarPagosDetalle(pagosValor).reduce((total, pago) => total + Number(pago.monto || 0), 0)
+    );
+  };
+
+  const totalPagadoTrabajo = (trabajo) => {
+    const totalDetalle = totalPagosDetalle(trabajo?.pagos_detalle);
+    if (totalDetalle > 0) return totalDetalle;
+    if (Number(trabajo?.total_pagado || 0) > 0) return redondearDinero(trabajo.total_pagado);
+    if (trabajo?.pago_recibido) return calcularTotales(trabajo).totalGenerado;
+    return 0;
+  };
+
+  const saldoPendienteTrabajo = (trabajo) => {
+    const total = calcularTotales(trabajo).totalGenerado;
+    const pagado = totalPagadoTrabajo(trabajo);
+    const saldoBD = Number(trabajo?.saldo_pendiente || 0);
+
+    if (saldoBD > 0 && pagado < total) return redondearDinero(saldoBD);
+
+    return redondearDinero(Math.max(0, total - pagado));
+  };
+
+  const pagosPorMetodoTrabajo = (trabajo) => {
+    const resumen = {};
+
+    limpiarPagosDetalle(trabajo?.pagos_detalle).forEach((pago) => {
+      const metodo = normalizarMetodoPago(pago.metodo);
+      if (!metodo) return;
+      resumen[metodo] = redondearDinero(Number(resumen[metodo] || 0) + Number(pago.monto || 0));
+    });
+
+    return resumen;
+  };
+
+  const textoPagosDetalle = (trabajo) => {
+    const pagos = limpiarPagosDetalle(trabajo?.pagos_detalle);
+
+    if (pagos.length > 0) {
+      return pagos.map((pago) => `${pago.metodo}: ${dinero(pago.monto)}`).join(" • ");
+    }
+
+    if (String(trabajo?.metodo_pago || "").includes("+")) {
+      return "Pago combinado sin desglose";
+    }
+
+    return normalizarMetodoPago(trabajo?.metodo_pago) || "No registrado";
+  };
+
+  const abrirAjustePagos = (trabajo) => {
+    const pagos = limpiarPagosDetalle(trabajo.pagos_detalle);
+
+    if (pagos.length > 0) {
+      setPagosDraft(pagos);
+    } else if (trabajo.pago_recibido && trabajo.metodo_pago) {
+      setPagosDraft([
+        {
+          id: `${Date.now()}-pago-historial`,
+          metodo: normalizarMetodoPago(trabajo.metodo_pago) || "Cash",
+          monto: calcularTotales(trabajo).totalGenerado,
+          nota: "Pago registrado"
+        }
+      ]);
+    } else {
+      setPagosDraft([]);
+    }
+
+    setNotaPagoDraft("");
+    setTrabajoAjustandoPago(trabajo);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelarAjustePagos = () => {
+    setTrabajoAjustandoPago(null);
+    setPagosDraft([]);
+    setNotaPagoDraft("");
+  };
+
+  const agregarPagoDraft = () => {
+    setPagosDraft((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-pago-${prev.length}`,
+        metodo: "",
+        monto: "",
+        nota: ""
+      }
+    ]);
+  };
+
+  const actualizarPagoDraft = (index, campo, valor) => {
+    setPagosDraft((prev) => {
+      const copia = [...prev];
+      copia[index] = {
+        ...(copia[index] || {}),
+        [campo]: valor
+      };
+      return copia;
+    });
+  };
+
+  const eliminarPagoDraft = (index) => {
+    setPagosDraft((prev) => prev.filter((_pago, i) => i !== index));
+  };
+
+  const guardarAjustePagos = async () => {
+    if (!trabajoAjustandoPago?.id) return;
+
+    const totalTrabajo = calcularTotales(trabajoAjustandoPago).totalGenerado;
+    const pagosLimpios = limpiarPagosDetalle(pagosDraft).map((pago, index) => ({
+      ...pago,
+      id: pago.id || `${Date.now()}-pago-${index}`,
+      nota: pago.nota || notaPagoDraft || "Ajustado desde Historial"
+    }));
+
+    const totalPagado = totalPagosDetalle(pagosLimpios);
+    const saldoPendiente = redondearDinero(Math.max(0, totalTrabajo - totalPagado));
+    const pagoRecibido = totalTrabajo > 0 && saldoPendiente <= 0.009;
+    const metodoResumen = pagosLimpios.length > 0
+      ? [...new Set(pagosLimpios.map((pago) => pago.metodo))].join(" + ")
+      : "Pendiente";
+
+    const confirmar = confirm(
+      `¿Guardar ajuste de pagos?\n\nCliente: ${trabajoAjustandoPago.cliente_nombre || "No registrado"}\nTotal factura: ${dinero(totalTrabajo)}\nTotal pagado: ${dinero(totalPagado)}\nPendiente: ${dinero(saldoPendiente)}`
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        metodo_pago: metodoResumen,
+        pagos_detalle: pagosLimpios,
+        total_pagado: totalPagado,
+        saldo_pendiente: saldoPendiente,
+        pago_recibido: pagoRecibido,
+        fecha_pago: pagoRecibido ? (trabajoAjustandoPago.fecha_pago || new Date().toISOString()) : null
+      })
+      .eq("id", trabajoAjustandoPago.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      return;
+    }
+
+    alert("Pagos ajustados correctamente.");
+    cancelarAjustePagos();
+    await cargarHistorial();
   };
 
   const parsearArray = (valor) => {
@@ -211,6 +420,7 @@ function Historial() {
         trabajo.trabajo,
         trabajo.resultado_diagnostico,
         trabajo.metodo_pago,
+        textoPagosDetalle(trabajo),
         trabajo.orden_id,
         trabajo.id,
         ...piezas.map((pieza) => pieza.nombre),
@@ -231,6 +441,75 @@ function Historial() {
       <p style={subtituloStyle}>
         Aquí quedan registrados los trabajos finalizados con cliente, vehículo, mecánico, estimado, factura, firma, piezas, servicios y cobros.
       </p>
+
+      {trabajoAjustandoPago && (
+        <div style={paymentEditorBox}>
+          <h2 style={{ color: "#f59e0b", marginTop: 0 }}>💳 Ajustar pagos del historial</h2>
+          <p style={paymentEditorNotice}>
+            Solo se actualizan los pagos, total pagado, saldo pendiente, estado del pago y fecha de pago. No se toca factura, piezas, servicios, mecánicos ni comisiones.
+          </p>
+
+          <div style={paymentEditorSummary}>
+            <strong>{trabajoAjustandoPago.cliente_nombre || "Cliente no registrado"}</strong>
+            <span>Factura: {trabajoAjustandoPago.numero_factura || "No registrada"}</span>
+            <span>Total factura: {dinero(calcularTotales(trabajoAjustandoPago).totalGenerado)}</span>
+            <span>Total pagado: {dinero(totalPagosDetalle(pagosDraft))}</span>
+            <span>Pendiente: {dinero(Math.max(0, calcularTotales(trabajoAjustandoPago).totalGenerado - totalPagosDetalle(pagosDraft)))}</span>
+          </div>
+
+          {pagosDraft.length === 0 ? (
+            <p style={{ color: "#9ca3af" }}>No hay pagos agregados.</p>
+          ) : (
+            <div style={paymentRowsBox}>
+              {pagosDraft.map((pago, index) => (
+                <div key={pago.id || index} style={paymentRowStyle}>
+                  <select
+                    value={pago.metodo || ""}
+                    onChange={(e) => actualizarPagoDraft(index, "metodo", e.target.value)}
+                    style={inputSmall}
+                  >
+                    <option value="">Método</option>
+                    {metodosPago.map((metodo) => (
+                      <option key={metodo} value={metodo}>{metodo}</option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    placeholder="Monto"
+                    value={pago.monto ?? ""}
+                    onChange={(e) => actualizarPagoDraft(index, "monto", e.target.value)}
+                    style={inputSmall}
+                  />
+
+                  <input
+                    placeholder="Nota opcional"
+                    value={pago.nota || ""}
+                    onChange={(e) => actualizarPagoDraft(index, "nota", e.target.value)}
+                    style={inputSmall}
+                  />
+
+                  <button onClick={() => eliminarPagoDraft(index)} style={deletePaymentButton}>🗑</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            placeholder="Nota general opcional del ajuste"
+            value={notaPagoDraft}
+            onChange={(e) => setNotaPagoDraft(e.target.value)}
+            style={searchStyle}
+          />
+
+          <div style={linksRow}>
+            <button onClick={agregarPagoDraft} style={addPaymentButton}>➕ Agregar pago</button>
+            <button onClick={guardarAjustePagos} style={savePaymentButton}>💾 Guardar ajuste</button>
+            <button onClick={cancelarAjustePagos} style={cancelPaymentButton}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
 
       <input
         placeholder="Buscar por cliente, factura, teléfono, vehículo, pieza, servicio o mecánico..."
@@ -260,10 +539,39 @@ function Historial() {
                       {trabajo.cliente_nombre || cliente?.nombre || "Cliente no registrado"}
                     </h2>
                     <p style={mutedText}>Trabajo #{trabajo.id} {trabajo.orden_id ? `• Orden #${trabajo.orden_id}` : ""}</p>
+                    <p style={mutedText}>{trabajo.vehiculo || "Vehículo no registrado"}</p>
                   </div>
 
                   <span style={statusBadge}>Finalizado</span>
                 </div>
+
+                <div style={compactMoneyBox}>
+                  <div><strong>Factura</strong><span>{trabajo.numero_factura || "No registrada"}</span></div>
+                  <div><strong>Total</strong><span>{dinero(totales.totalGenerado)}</span></div>
+                  <div><strong>Pagado</strong><span>{dinero(totalPagadoTrabajo(trabajo))}</span></div>
+                  <div><strong>Pendiente</strong><span>{dinero(saldoPendienteTrabajo(trabajo))}</span></div>
+                </div>
+
+                <div style={paymentCompactBox}>
+                  <strong>💳 Pagos:</strong> {textoPagosDetalle(trabajo)}
+                </div>
+
+                <div style={linksRow}>
+                  <button onClick={() => abrirAjustePagos(trabajo)} style={adjustPaymentButton}>💳 Ajustar pagos</button>
+                  {trabajo.factura_pdf_url && (
+                    <a href={trabajo.factura_pdf_url} target="_blank" rel="noreferrer" style={linkButton}>
+                      🧾 Ver factura PDF
+                    </a>
+                  )}
+                  {trabajo.estimado_pdf_url && (
+                    <a href={trabajo.estimado_pdf_url} target="_blank" rel="noreferrer" style={linkButton}>
+                      📄 Ver estimado PDF
+                    </a>
+                  )}
+                </div>
+
+                <details style={detailsPanel}>
+                  <summary style={detailsSummary}>👁 Ver detalles completos</summary>
 
                 <div style={sectionBox}>
                   <h3 style={sectionMiniTitle}>👤 Cliente y vehículo</h3>
@@ -368,9 +676,20 @@ function Historial() {
                   <p><strong>Factura:</strong> {trabajo.numero_factura || "No registrada"}</p>
                   <p><strong>Factura creada:</strong> {formatearFecha(trabajo.factura_creada_en)}</p>
                   <p><strong>Finalizado:</strong> {formatearFecha(trabajo.hora_fin)}</p>
-                  <p><strong>💳 Método de pago:</strong> {trabajo.metodo_pago || "No registrado"}</p>
+                  <p><strong>💳 Método de pago:</strong> {textoPagosDetalle(trabajo)}</p>
                   <p><strong>✅ Pago recibido:</strong> {trabajo.pago_recibido ? "Sí" : "No"}</p>
                   <p><strong>🕒 Fecha de pago:</strong> {formatearFecha(trabajo.fecha_pago)}</p>
+
+                  {limpiarPagosDetalle(trabajo.pagos_detalle).length > 0 && (
+                    <div style={detailList}>
+                      {limpiarPagosDetalle(trabajo.pagos_detalle).map((pago, index) => (
+                        <div key={pago.id || index} style={detailRow}>
+                          <span>{pago.metodo} {pago.nota ? `— ${pago.nota}` : ""}</span>
+                          <strong>{dinero(pago.monto)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div style={moneyGrid}>
                     <MoneyItem label="Compra piezas" value={totales.costoPiezas} />
@@ -379,7 +698,9 @@ function Historial() {
                     <MoneyItem label="Mano de obra" value={totales.manoObra} />
                     <MoneyItem label="Cargo general 4%" value={totales.cargoGeneral4} />
                     <MoneyItem label="Ganancia piezas" value={totales.gananciaPiezas} />
-                    <MoneyItem label="Total cobrado" value={totales.totalGenerado} strong />
+                    <MoneyItem label="Total factura" value={totales.totalGenerado} strong />
+                    <MoneyItem label="Total pagado" value={totalPagadoTrabajo(trabajo)} strong />
+                    <MoneyItem label="Saldo pendiente" value={saldoPendienteTrabajo(trabajo)} strong />
                     <MoneyItem label="Ganancia aprox." value={totales.gananciaAprox} strong />
                   </div>
 
@@ -414,6 +735,8 @@ function Historial() {
                   )}
                 </div>
 
+                </details>
+
                 <button
                   onClick={() => archivarHistorial(trabajo)}
                   style={archiveButton}
@@ -440,6 +763,136 @@ function MoneyItem({ label, value, strong = false }) {
   );
 }
 
+
+const paymentEditorBox = {
+  background: "rgba(15, 23, 42, 0.96)",
+  border: "1px solid #f59e0b",
+  borderRadius: "14px",
+  padding: "18px",
+  marginBottom: "22px"
+};
+
+const paymentEditorNotice = {
+  color: "#fde68a",
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px"
+};
+
+const paymentEditorSummary = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "10px",
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "12px",
+  marginBottom: "12px"
+};
+
+const paymentRowsBox = {
+  display: "grid",
+  gap: "8px",
+  marginBottom: "12px"
+};
+
+const paymentRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(140px, 1fr) minmax(110px, 150px) minmax(160px, 1fr) auto",
+  gap: "8px",
+  alignItems: "center"
+};
+
+const inputSmall = {
+  padding: "10px",
+  borderRadius: "8px",
+  border: "1px solid #374151",
+  background: "#111827",
+  color: "white",
+  width: "100%"
+};
+
+const deletePaymentButton = {
+  padding: "10px",
+  borderRadius: "8px",
+  border: "none",
+  background: "#dc2626",
+  color: "white",
+  cursor: "pointer"
+};
+
+const addPaymentButton = {
+  padding: "10px 12px",
+  borderRadius: "8px",
+  border: "none",
+  background: "#2563eb",
+  color: "white",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const savePaymentButton = {
+  padding: "10px 12px",
+  borderRadius: "8px",
+  border: "none",
+  background: "#16a34a",
+  color: "white",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const cancelPaymentButton = {
+  padding: "10px 12px",
+  borderRadius: "8px",
+  border: "none",
+  background: "#6b7280",
+  color: "white",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const compactMoneyBox = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "10px",
+  marginTop: "14px",
+  marginBottom: "10px"
+};
+
+const paymentCompactBox = {
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  marginBottom: "10px",
+  color: "#e5e7eb"
+};
+
+const adjustPaymentButton = {
+  padding: "9px 12px",
+  borderRadius: "8px",
+  background: "#0891b2",
+  color: "white",
+  border: "none",
+  fontWeight: "bold",
+  cursor: "pointer"
+};
+
+const detailsPanel = {
+  marginTop: "12px",
+  borderTop: "1px solid #374151",
+  paddingTop: "10px"
+};
+
+const detailsSummary = {
+  cursor: "pointer",
+  color: "#f59e0b",
+  fontWeight: "bold",
+  marginBottom: "10px"
+};
+
+
 const tituloStyle = {
   color: "#f59e0b",
   marginBottom: "8px"
@@ -462,7 +915,7 @@ const searchStyle = {
 
 const gridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))",
+  gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))",
   gap: "20px"
 };
 

@@ -3344,6 +3344,28 @@ export default function ControlTrabajosMecanicos() {
     return "Trabajo Manual";
   };
 
+
+  const metodoPagoVisibleTrabajo = (trabajo) => {
+    const pagos = limpiarPagosDetalle(trabajo.pagos_detalle);
+    if (pagos.length > 0) {
+      return pagos.map((pago) => `${pago.metodo}: ${dinero(pago.monto)}`).join(" • ");
+    }
+
+    if (metodoPagoEsCombinado(trabajo.metodo_pago)) {
+      return "Pago combinado sin desglose";
+    }
+
+    return resumenMetodoPago(trabajo.pagos_detalle, trabajo.metodo_pago) || "No registrado";
+  };
+
+  const totalPagadoVisibleTrabajo = (trabajo) => {
+    const totalDetalle = totalPagosDetalle(trabajo.pagos_detalle);
+    if (totalDetalle > 0) return totalDetalle;
+    if (Number(trabajo.total_pagado || 0) > 0) return redondearDinero(trabajo.total_pagado);
+    if (trabajo.pago_recibido) return calcularTotalTrabajoCliente(trabajo);
+    return 0;
+  };
+
   const mostrarEstado = (estado) => {
     const encontrado = estados.find((item) => item.value === estado);
     if (encontrado) return encontrado.label;
@@ -3390,7 +3412,10 @@ export default function ControlTrabajosMecanicos() {
           }
         `}
       </style>
-      <h1 style={titleStyle}>🔧 Control Central de Trabajos</h1>
+      <h1 style={titleStyle}>🔧 Control de Trabajos</h1>
+      <p style={professionalHint}>
+        Vista operativa limpia: los trabajos activos quedan aquí; los trabajos finalizados se consultan desde Historial y permiten ajustar pagos sin tocar factura, piezas, mano de obra ni comisiones.
+      </p>
 
       <div style={summaryGrid}>
         <div style={summaryCard}><strong>🟢 Trabajos activos</strong><span style={summaryNumber}>{resumen.trabajosActivos}</span></div>
@@ -3401,8 +3426,8 @@ export default function ControlTrabajosMecanicos() {
         <div style={summaryCard}><strong>📈 Ganancia piezas mes</strong><span style={summaryNumber}>{dinero(resumen.gananciaPiezasMes)}</span></div>
       </div>
 
-      <div style={formBox}>
-        <h2 style={{ color: "#f59e0b", marginTop: 0 }}>➕ Nuevo Trabajo Manual</h2>
+      <details style={formBox}>
+        <summary style={formSummary}>➕ Nuevo Trabajo Manual</summary>
 
         <select value={form.mecanico_id} onChange={(e) => setForm({ ...form, mecanico_id: e.target.value })} style={inputStyle}>
           <option value="">Seleccionar mecánico</option>
@@ -3419,7 +3444,7 @@ export default function ControlTrabajosMecanicos() {
         <textarea placeholder="Notas" value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} style={{ ...inputStyle, minHeight: "80px" }} />
 
         <button onClick={crearTrabajo} style={saveButton}>Crear Trabajo e Iniciar Tiempo</button>
-      </div>
+      </details>
 
       {trabajoEditando && (
         <div style={editBox}>
@@ -3561,20 +3586,20 @@ export default function ControlTrabajosMecanicos() {
         </div>
       )}
 
-      <h2 style={sectionTitle}>{vistaTrabajos === "historial" ? "🏁 Historial de Trabajos" : "📋 Trabajos Activos"}</h2>
+      <h2 style={sectionTitle}>{vistaTrabajos === "historial" ? "📁 Historial / Pagos Finalizados" : "📋 Trabajos Activos"}</h2>
 
       <div style={viewToggleBox}>
         <button
           onClick={() => setVistaTrabajos("activos")}
           style={vistaTrabajos === "activos" ? viewButtonActive : viewButton}
         >
-          🟢 Activos ({trabajosActivosLista.length})
+          🔧 Activos ({trabajosActivosLista.length})
         </button>
         <button
           onClick={() => setVistaTrabajos("historial")}
           style={vistaTrabajos === "historial" ? viewButtonActive : viewButton}
         >
-          🏁 Historial ({trabajosHistorialLista.length})
+          📁 Historial ({trabajosHistorialLista.length})
         </button>
       </div>
 
@@ -3596,7 +3621,49 @@ export default function ControlTrabajosMecanicos() {
         <div className="trabajos-grid" style={gridStyle}>
           {trabajosFiltrados.map((trabajo) => (
             <div key={trabajo.id} style={cardStyle}>
-              <h2 style={{ color: "#f59e0b", marginTop: 0 }}>{trabajo.mecanico_nombre}</h2>
+              <div style={jobHeaderCompact}>
+                <div>
+                  <h2 style={{ color: "#f59e0b", margin: "0 0 6px 0" }}>{trabajo.cliente_nombre || "Cliente no registrado"}</h2>
+                  <p style={compactMeta}>{trabajo.vehiculo || "Vehículo no registrado"}</p>
+                  <p style={compactMeta}>Mecánico: {trabajo.mecanico_nombre || "Sin mecánico"}</p>
+                </div>
+
+                <div style={jobStatusBox}>
+                  <span style={esTrabajoActivo(trabajo) ? activeBadge : finishedBadge}>
+                    {esTrabajoActivo(trabajo) ? "Activo" : "Finalizado"}
+                  </span>
+                  <span style={statusBadge}>{mostrarEstado(trabajo.estado)}</span>
+                </div>
+              </div>
+
+              <div style={jobMoneySummary}>
+                <div><strong>Total</strong><span>{dinero(calcularTotalTrabajoCliente(trabajo))}</span></div>
+                <div><strong>Pagado</strong><span>{dinero(totalPagadoVisibleTrabajo(trabajo))}</span></div>
+                <div><strong>Pendiente</strong><span>{dinero(saldoPendienteTrabajo(trabajo))}</span></div>
+              </div>
+
+              <div style={paymentSummaryCompact}>
+                <strong>💳 Pago:</strong> {metodoPagoVisibleTrabajo(trabajo)}
+              </div>
+
+              <div style={primaryActionsBar}>
+                {!esTrabajoActivo(trabajo) && (
+                  <button onClick={() => abrirEdicionContabilidad(trabajo, true)} style={paymentAdjustButton}>💳 Ajustar pagos</button>
+                )}
+
+                {esTrabajoActivo(trabajo) && (
+                  <button onClick={() => finalizarTrabajo(trabajo)} style={finishButton}>⏹ Finalizar</button>
+                )}
+
+                <button onClick={() => abrirEdicionContabilidad(trabajo)} style={editButton}>
+                  ✏️ {esTrabajoActivo(trabajo) ? "Editar" : "Ver / Editar"}
+                </button>
+              </div>
+
+              <details style={detailsPanel} open={vistaTrabajos === "activos"}>
+                <summary style={detailsSummary}>👁 Ver detalles completos</summary>
+
+                <h2 style={{ color: "#f59e0b", marginTop: "14px" }}>{trabajo.mecanico_nombre}</h2>
 
               <p><strong>Origen:</strong> <span style={origenStyle(trabajo)}>{mostrarOrigenTexto(trabajo)}</span></p>
               {trabajo.solicitud_id && <p><strong>📥 Solicitud:</strong> #{trabajo.solicitud_id}</p>}
@@ -4028,6 +4095,7 @@ export default function ControlTrabajosMecanicos() {
 
                 <input type="file" accept="image/*,.pdf" onChange={(e) => subirFactura(trabajo, e.target.files[0])} style={fileInput} />
               </div>
+              </details>
             </div>
           ))}
         </div>
@@ -4067,7 +4135,7 @@ const cardStyle = {
   border: "1px solid #374151",
   minWidth: 0,
   maxWidth: "100%",
-  overflowX: "auto",
+  overflowX: "hidden",
   wordBreak: "break-word"
 };
 const lineStyle = { border: "none", borderTop: "1px solid #374151", margin: "15px 0" };
@@ -4282,5 +4350,81 @@ const paymentAdjustButton = {
   marginTop: "8px",
   marginRight: "8px"
 };
+
+
+const professionalHint = {
+  color: "#d1d5db",
+  background: "rgba(15, 23, 42, 0.85)",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px 12px",
+  marginTop: "-10px",
+  marginBottom: "18px"
+};
+
+const formSummary = {
+  color: "#f59e0b",
+  fontSize: "20px",
+  fontWeight: "bold",
+  cursor: "pointer",
+  marginBottom: "14px"
+};
+
+const jobHeaderCompact = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "12px",
+  alignItems: "flex-start",
+  marginBottom: "12px"
+};
+
+const compactMeta = {
+  color: "#d1d5db",
+  margin: "3px 0"
+};
+
+const jobStatusBox = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "6px",
+  alignItems: "flex-end"
+};
+
+const jobMoneySummary = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, 1fr)",
+  gap: "8px",
+  marginBottom: "10px"
+};
+
+const paymentSummaryCompact = {
+  background: "#0f172a",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  color: "#e5e7eb",
+  marginBottom: "10px"
+};
+
+const primaryActionsBar = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "8px",
+  marginBottom: "10px"
+};
+
+const detailsPanel = {
+  borderTop: "1px solid #374151",
+  paddingTop: "10px",
+  marginTop: "10px"
+};
+
+const detailsSummary = {
+  cursor: "pointer",
+  color: "#f59e0b",
+  fontWeight: "bold",
+  marginBottom: "8px"
+};
+
 
 const fileInput = { marginTop: "15px", color: "white" };

@@ -871,11 +871,14 @@ function Mecanicos() {
   return (
     <div>
       <h1 style={titleStyle}>👨‍🔧 Panel de Mecánicos</h1>
+      <p style={subtitleStyle}>
+        Resumen profesional por mecánico: producción, comisiones, pagos calculados y servicios asignados en paneles organizados.
+      </p>
 
-      <div style={formBox}>
-        <h2 style={{ color: "#f59e0b", marginTop: 0 }}>
+      <details style={formBox} open={Boolean(editandoId)}>
+        <summary style={formSummary}>
           {editandoId ? "✏️ Editar Mecánico" : "➕ Registrar Mecánico"}
-        </h2>
+        </summary>
 
         <input placeholder="Nombre del mecánico" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} style={inputStyle} />
         <input placeholder="Teléfono" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} style={inputStyle} />
@@ -897,7 +900,7 @@ function Mecanicos() {
         </button>
 
         {editandoId && <button onClick={limpiarFormulario} style={cancelButton}>Cancelar Edición</button>}
-      </div>
+      </details>
 
       <button onClick={limpiarMecanicosDePrueba} style={cleanButton}>🧹 Limpiar Mecánicos de Prueba</button>
 
@@ -909,111 +912,247 @@ function Mecanicos() {
         <div style={emptyStyle}>No hay mecánicos registrados.</div>
       ) : (
         <div style={gridStyle}>
-          {mecanicos.map((mecanico) => (
-            <div key={mecanico.nombre} style={cardStyle}>
-              <h2 style={{ color: "#f59e0b", marginTop: 0 }}>{mecanico.nombre}</h2>
+          {mecanicos.map((mecanico) => {
+            const comisionSemana =
+              mecanico.tipo_pago === "comision" ||
+              mecanico.tipo_pago === "salario_mas_comision"
+                ? mecanico.baseComisionSemana * (Number(mecanico.porcentaje_comision || 0) / 100)
+                : 0;
 
-              <p><strong>Tipo de pago:</strong> {mostrarTipoPago(mecanico.tipo_pago)}</p>
-              <p><strong>Salario fijo semanal:</strong> {dinero(mecanico.salario_fijo)}</p>
-              <p><strong>Pago por hora:</strong> {dinero(mecanico.pago_hora)}</p>
-              <p><strong>Comisión:</strong> {Number(mecanico.porcentaje_comision || 0)}%</p>
+            const comisionMes =
+              mecanico.tipo_pago === "comision" ||
+              mecanico.tipo_pago === "salario_mas_comision"
+                ? mecanico.baseComisionMes * (Number(mecanico.porcentaje_comision || 0) / 100)
+                : 0;
 
-              <hr style={lineStyle} />
-
-              <p><strong>⏱ Esta semana:</strong> {convertirMinutos(mecanico.semanaMinutos)}</p>
-              <p><strong>🗓 Este mes:</strong> {convertirMinutos(mecanico.mesMinutos)}</p>
-              <p><strong>📊 Total histórico:</strong> {convertirMinutos(mecanico.totalMinutos)}</p>
-              <p><strong>🔧 Trabajos registrados:</strong> {mecanico.trabajos}</p>
-              <p><strong>📋 Desde órdenes/clientes:</strong> {mecanico.trabajosOrdenes}</p>
-              <p><strong>🛠 Desde control trabajos:</strong> {mecanico.trabajosManuales}</p>
-              <p><strong>🟢 Trabajos activos:</strong> {mecanico.activos}</p>
-
-              <hr style={lineStyle} />
-
-              <p><strong>Trabajos facturados semana:</strong> {mecanico.trabajosFinalizadosSemana}</p>
-              <p><strong>Trabajos facturados mes:</strong> {mecanico.trabajosFinalizadosMes}</p>
-              <p><strong>Producción real semana:</strong> {dinero(mecanico.produccionSemana)}</p>
-              <p><strong>Producción real mes:</strong> {dinero(mecanico.produccionMes)}</p>
-              <p><strong>Mano de obra semana:</strong> {dinero(mecanico.manoObraSemana)}</p>
-              <p><strong>Mano de obra mes:</strong> {dinero(mecanico.manoObraMes)}</p>
-              <p><strong>Ganancia piezas semana:</strong> {dinero(mecanico.gananciaPiezasSemana)}</p>
-              <p><strong>Ganancia piezas mes:</strong> {dinero(mecanico.gananciaPiezasMes)}</p>
-              <p><strong>Base comisión semana:</strong> {dinero(mecanico.baseComisionSemana)}</p>
-              <p><strong>Base comisión mes:</strong> {dinero(mecanico.baseComisionMes)}</p>
-
-              {(mecanico.serviciosAsignadosSemana || []).length > 0 && (
-                <div style={serviceBox}>
-                  <strong>🧾 Servicios asignados esta semana:</strong>
-                  {(mecanico.serviciosAsignadosSemana || []).map((servicio, index) => (
-                    <div key={`${servicio.trabajo_id}-${index}`} style={serviceItem}>
-                      <span>{servicio.tipo || "Servicio"}</span>
-                      <span>{servicio.cliente_nombre}</span>
-                      <strong>{dinero(servicio.precio)}</strong>
-                    </div>
-                  ))}
+            return (
+              <div key={mecanico.nombre} style={cardStyle}>
+                <div style={mechanicHeader}>
+                  <div>
+                    <h2 style={{ color: "#f59e0b", margin: 0 }}>👨‍🔧 {mecanico.nombre}</h2>
+                    <p style={mutedText}>{mostrarTipoPago(mecanico.tipo_pago)}</p>
+                  </div>
+                  <span style={activeBadge}>{mecanico.activos} activos</span>
                 </div>
-              )}
 
-              {(mecanico.serviciosAsignadosMes || []).length > 0 && (
-                <div style={serviceBox}>
-                  <strong>🧾 Servicios asignados este mes:</strong>
-                  {(mecanico.serviciosAsignadosMes || []).map((servicio, index) => (
-                    <div key={`${servicio.trabajo_id}-mes-${index}`} style={serviceItem}>
-                      <span>{servicio.tipo || "Servicio"}</span>
-                      <span>{servicio.cliente_nombre}</span>
-                      <strong>{dinero(servicio.precio)}</strong>
-                    </div>
-                  ))}
+                <div style={mainStatsGrid}>
+                  <div style={statBox}>
+                    <span>Producción mes</span>
+                    <strong>{dinero(mecanico.produccionMes)}</strong>
+                  </div>
+                  <div style={statBox}>
+                    <span>Pago mes</span>
+                    <strong>{dinero(mecanico.pagoMes)}</strong>
+                  </div>
+                  <div style={statBox}>
+                    <span>Comisión mes</span>
+                    <strong>{dinero(comisionMes)}</strong>
+                  </div>
+                  <div style={statBox}>
+                    <span>Trabajos mes</span>
+                    <strong>{mecanico.trabajosFinalizadosMes}</strong>
+                  </div>
                 </div>
-              )}
-              <p>
-                <strong>💰 Comisión ganada semana:</strong>{" "}
-                {dinero(
-                  mecanico.tipo_pago === "comision" ||
-                  mecanico.tipo_pago === "salario_mas_comision"
-                    ? mecanico.baseComisionSemana *
-                        (Number(mecanico.porcentaje_comision || 0) / 100)
-                    : 0
-                )}
-              </p>
-              <p>
-                <strong>💰 Comisión ganada mes:</strong>{" "}
-                {dinero(
-                  mecanico.tipo_pago === "comision" ||
-                  mecanico.tipo_pago === "salario_mas_comision"
-                    ? mecanico.baseComisionMes *
-                        (Number(mecanico.porcentaje_comision || 0) / 100)
-                    : 0
-                )}
-              </p>
-              <p><strong>Semanas reales trabajadas semana:</strong> {mecanico.semanasTrabajadasSemana}</p>
-              <p><strong>Semanas reales trabajadas mes:</strong> {mecanico.semanasTrabajadasMes}</p>
 
-              <hr style={lineStyle} />
+                <div style={payHighlight}>
+                  <span>💵 Total a pagar semana</span>
+                  <strong>{dinero(mecanico.pagoSemana)}</strong>
+                </div>
 
-              <p><strong>Pago calculado semana:</strong> {dinero(mecanico.pagoSemana)}</p>
-              <p><strong>Pago calculado mes:</strong> {dinero(mecanico.pagoMes)}</p>
+                <div style={payHighlight}>
+                  <span>💵 Total a pagar mes</span>
+                  <strong>{dinero(mecanico.pagoMes)}</strong>
+                </div>
 
-              <p style={{ color: "#22c55e", fontWeight: "bold", fontSize: "18px" }}>
-                💵 Total a pagar semana: {dinero(mecanico.pagoSemana)}
-              </p>
+                <details style={detailsBox}>
+                  <summary style={detailsSummary}>📊 Ver producción</summary>
 
-              <p style={{ color: "#22c55e", fontWeight: "bold", fontSize: "18px" }}>
-                💵 Total a pagar mes: {dinero(mecanico.pagoMes)}
-              </p>
+                  <div style={sectionGrid}>
+                    <div style={miniInfoBox}><span>⏱ Esta semana</span><strong>{convertirMinutos(mecanico.semanaMinutos)}</strong></div>
+                    <div style={miniInfoBox}><span>🗓 Este mes</span><strong>{convertirMinutos(mecanico.mesMinutos)}</strong></div>
+                    <div style={miniInfoBox}><span>📊 Total histórico</span><strong>{convertirMinutos(mecanico.totalMinutos)}</strong></div>
+                    <div style={miniInfoBox}><span>🔧 Trabajos registrados</span><strong>{mecanico.trabajos}</strong></div>
+                    <div style={miniInfoBox}><span>📋 Desde órdenes/clientes</span><strong>{mecanico.trabajosOrdenes}</strong></div>
+                    <div style={miniInfoBox}><span>🛠 Desde control trabajos</span><strong>{mecanico.trabajosManuales}</strong></div>
+                    <div style={miniInfoBox}><span>Trabajos facturados semana</span><strong>{mecanico.trabajosFinalizadosSemana}</strong></div>
+                    <div style={miniInfoBox}><span>Trabajos facturados mes</span><strong>{mecanico.trabajosFinalizadosMes}</strong></div>
+                    <div style={miniInfoBox}><span>Producción real semana</span><strong>{dinero(mecanico.produccionSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Producción real mes</span><strong>{dinero(mecanico.produccionMes)}</strong></div>
+                    <div style={miniInfoBox}><span>Mano de obra semana</span><strong>{dinero(mecanico.manoObraSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Mano de obra mes</span><strong>{dinero(mecanico.manoObraMes)}</strong></div>
+                    <div style={miniInfoBox}><span>Ganancia piezas semana</span><strong>{dinero(mecanico.gananciaPiezasSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Ganancia piezas mes</span><strong>{dinero(mecanico.gananciaPiezasMes)}</strong></div>
+                  </div>
+                </details>
 
-              <button onClick={() => guardarReporteMecanico("semanal", mecanico)} style={reportButton}>💾 Guardar Reporte Semanal</button>
-              <button onClick={() => guardarReporteMecanico("mensual", mecanico)} style={reportButton}>💾 Guardar Reporte Mensual</button>
-              <button onClick={() => editarMecanico(mecanico)} style={editButton}>✏️ Editar Mecánico</button>
-              <button onClick={() => desactivarMecanico(mecanico)} style={deleteButton}>🚫 Desactivar</button>
-              <button onClick={() => limpiarDatosDeMecanico(mecanico)} style={cleanButtonSmall}>🧹 Limpiar Datos</button>
-            </div>
-          ))}
+                <details style={detailsBox}>
+                  <summary style={detailsSummary}>💰 Ver pago y comisión</summary>
+
+                  <div style={sectionGrid}>
+                    <div style={miniInfoBox}><span>Tipo de pago</span><strong>{mostrarTipoPago(mecanico.tipo_pago)}</strong></div>
+                    <div style={miniInfoBox}><span>Salario fijo semanal</span><strong>{dinero(mecanico.salario_fijo)}</strong></div>
+                    <div style={miniInfoBox}><span>Pago por hora</span><strong>{dinero(mecanico.pago_hora)}</strong></div>
+                    <div style={miniInfoBox}><span>Comisión</span><strong>{Number(mecanico.porcentaje_comision || 0)}%</strong></div>
+                    <div style={miniInfoBox}><span>Base comisión semana</span><strong>{dinero(mecanico.baseComisionSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Base comisión mes</span><strong>{dinero(mecanico.baseComisionMes)}</strong></div>
+                    <div style={miniInfoBox}><span>Comisión ganada semana</span><strong>{dinero(comisionSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Comisión ganada mes</span><strong>{dinero(comisionMes)}</strong></div>
+                    <div style={miniInfoBox}><span>Semanas reales semana</span><strong>{mecanico.semanasTrabajadasSemana}</strong></div>
+                    <div style={miniInfoBox}><span>Semanas reales mes</span><strong>{mecanico.semanasTrabajadasMes}</strong></div>
+                    <div style={miniInfoBox}><span>Pago calculado semana</span><strong>{dinero(mecanico.pagoSemana)}</strong></div>
+                    <div style={miniInfoBox}><span>Pago calculado mes</span><strong>{dinero(mecanico.pagoMes)}</strong></div>
+                  </div>
+                </details>
+
+                <details style={detailsBox}>
+                  <summary style={detailsSummary}>🧾 Servicios asignados</summary>
+
+                  {(mecanico.serviciosAsignadosSemana || []).length === 0 && (mecanico.serviciosAsignadosMes || []).length === 0 ? (
+                    <p style={mutedText}>No hay servicios asignados desglosados.</p>
+                  ) : (
+                    <>
+                      {(mecanico.serviciosAsignadosSemana || []).length > 0 && (
+                        <div style={serviceBox}>
+                          <strong>Esta semana:</strong>
+                          {(mecanico.serviciosAsignadosSemana || []).map((servicio, index) => (
+                            <div key={`${servicio.trabajo_id}-${index}`} style={serviceItem}>
+                              <span>{servicio.tipo || "Servicio"}</span>
+                              <span>{servicio.cliente_nombre}</span>
+                              <strong>{dinero(servicio.precio)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {(mecanico.serviciosAsignadosMes || []).length > 0 && (
+                        <div style={serviceBox}>
+                          <strong>Este mes:</strong>
+                          {(mecanico.serviciosAsignadosMes || []).map((servicio, index) => (
+                            <div key={`${servicio.trabajo_id}-mes-${index}`} style={serviceItem}>
+                              <span>{servicio.tipo || "Servicio"}</span>
+                              <span>{servicio.cliente_nombre}</span>
+                              <strong>{dinero(servicio.precio)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </details>
+
+                <details style={detailsBox}>
+                  <summary style={detailsSummary}>⚙️ Reportes y configuración</summary>
+
+                  <button onClick={() => guardarReporteMecanico("semanal", mecanico)} style={reportButton}>💾 Guardar Reporte Semanal</button>
+                  <button onClick={() => guardarReporteMecanico("mensual", mecanico)} style={reportButton}>💾 Guardar Reporte Mensual</button>
+                  <button onClick={() => editarMecanico(mecanico)} style={editButton}>✏️ Editar Mecánico</button>
+                  <button onClick={() => desactivarMecanico(mecanico)} style={deleteButton}>🚫 Desactivar</button>
+                  <button onClick={() => limpiarDatosDeMecanico(mecanico)} style={cleanButtonSmall}>🧹 Limpiar Datos</button>
+                </details>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
+
+
+const subtitleStyle = {
+  color: "#d1d5db",
+  marginTop: "-10px",
+  marginBottom: "20px"
+};
+
+const formSummary = {
+  color: "#f59e0b",
+  fontSize: "20px",
+  fontWeight: "bold",
+  cursor: "pointer",
+  marginBottom: "14px"
+};
+
+const mechanicHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "12px",
+  alignItems: "flex-start",
+  marginBottom: "14px"
+};
+
+const mutedText = {
+  color: "#9ca3af",
+  margin: "6px 0"
+};
+
+const activeBadge = {
+  background: "#16a34a",
+  color: "white",
+  borderRadius: "999px",
+  padding: "6px 10px",
+  fontSize: "12px",
+  fontWeight: "bold",
+  whiteSpace: "nowrap"
+};
+
+const mainStatsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+  gap: "10px",
+  marginBottom: "12px"
+};
+
+const statBox = {
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  display: "grid",
+  gap: "5px"
+};
+
+const payHighlight = {
+  background: "rgba(22, 163, 74, 0.14)",
+  border: "1px solid #16a34a",
+  borderRadius: "10px",
+  padding: "10px",
+  color: "#22c55e",
+  fontWeight: "bold",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "10px",
+  marginTop: "8px"
+};
+
+const detailsBox = {
+  borderTop: "1px solid #374151",
+  marginTop: "12px",
+  paddingTop: "10px"
+};
+
+const detailsSummary = {
+  color: "#f59e0b",
+  cursor: "pointer",
+  fontWeight: "bold",
+  marginBottom: "10px"
+};
+
+const sectionGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "10px"
+};
+
+const miniInfoBox = {
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "10px",
+  padding: "10px",
+  display: "grid",
+  gap: "5px"
+};
+
 
 const titleStyle = { color: "#f59e0b", marginBottom: "20px" };
 const formBox = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "14px", border: "1px solid #f59e0b", marginBottom: "25px" };
@@ -1022,7 +1161,7 @@ const saveButton = { width: "100%", padding: "12px", background: "#16a34a", colo
 const cancelButton = { width: "100%", padding: "12px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const cleanButton = { width: "100%", padding: "12px", background: "#92400e", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", marginBottom: "18px" };
 const searchStyle = { width: "100%", padding: "12px", marginBottom: "25px", borderRadius: "10px", border: "1px solid #374151", background: "#1f2937", color: "white" };
-const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: "20px" };
+const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: "20px" };
 const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "14px", border: "1px solid #374151", color: "white" };
 const lineStyle = { border: "none", borderTop: "1px solid #374151", margin: "15px 0" };
 const reportButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
