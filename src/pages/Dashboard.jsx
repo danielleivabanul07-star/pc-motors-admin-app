@@ -21,6 +21,9 @@ function Dashboard() {
   const [resetSemanalDesde, setResetSemanalDesde] = useState(() =>
     localStorage.getItem("pc_motors_dashboard_reset_semanal_desde") || ""
   );
+  const [resetMensualDesde, setResetMensualDesde] = useState(() =>
+    localStorage.getItem("pc_motors_dashboard_reset_mensual_desde") || ""
+  );
   const [refrescando, setRefrescando] = useState(false);
   const [busquedaTrabajo, setBusquedaTrabajo] = useState("");
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({
@@ -103,6 +106,28 @@ function Dashboard() {
     // Si el reset es viejo, se ignora automáticamente al comenzar una semana nueva.
     if (resetDesde && resetDesde >= inicioSemanaActual) return resetDesde;
     return inicioSemanaActual;
+  };
+
+  const obtenerResetMensualDesde = () => {
+    const valor = localStorage.getItem("pc_motors_dashboard_reset_mensual_desde");
+    const fecha = convertirFechaSupabase(valor);
+    if (!fecha || Number.isNaN(fecha.getTime())) return null;
+    return fecha;
+  };
+
+  const obtenerInicioMesDashboard = () => {
+    const inicioMesActual = inicioMes();
+    const resetDesde = obtenerResetMensualDesde();
+
+    // Si el reset fue dentro de este mes, el Dashboard mensual empieza desde ese momento.
+    // Si el reset es viejo, se ignora automáticamente al comenzar un mes nuevo.
+    if (resetDesde && resetDesde >= inicioMesActual) return resetDesde;
+    return inicioMesActual;
+  };
+
+  const resetSemanalActivo = () => {
+    const resetDesde = obtenerResetSemanalDesde();
+    return Boolean(resetDesde && resetDesde >= inicioSemana());
   };
 
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
@@ -448,6 +473,13 @@ function Dashboard() {
       (trabajo) => trabajo.estado !== "finalizado" && !trabajo.hora_fin
     );
 
+    const trabajosMecanicosActivosDashboard = semanaReiniciada
+      ? trabajosMecanicosActivos.filter((trabajo) => {
+          const fecha = fechaTrabajoMecanico(trabajo);
+          return fecha && fecha >= inicioSemanaActual;
+        })
+      : trabajosMecanicosActivos;
+
     // Trabajos finalizados se separan en dos grupos:
     // 1) cobrados: sí entran al total cobrado, ganancias, taxes y desglose por método.
     // 2) pendientes: NO entran al total cobrado, pero se muestran aparte como pagos pendientes.
@@ -463,7 +495,8 @@ function Dashboard() {
     }
 
     const inicioSemanaActual = obtenerInicioSemanaDashboard();
-    const inicioMesActual = inicioMes();
+    const inicioMesActual = obtenerInicioMesDashboard();
+    const semanaReiniciada = resetSemanalActivo();
 
     const trabajosSemana = [];
     const trabajosMes = [];
@@ -499,25 +532,26 @@ function Dashboard() {
     mes.pagosPendientes = calcularPagosPendientes(trabajosPendientesMes);
 
     const clientesActivosDesdeTrabajos = new Set(
-      trabajosMecanicosActivos
+      trabajosMecanicosActivosDashboard
         .map((trabajo) => trabajo.cliente_id || `trabajo-${trabajo.id}`)
         .filter(Boolean)
     ).size;
 
     const vehiculosActivosDesdeTrabajos = new Set(
-      trabajosMecanicosActivos
+      trabajosMecanicosActivosDashboard
         .map((trabajo) => trabajo.vehiculo_id || `trabajo-${trabajo.id}`)
         .filter(Boolean)
     ).size;
 
-    const clientesEnProceso = Math.max(clientesActivos || 0, clientesActivosDesdeTrabajos);
-    const vehiculosEnProceso = Math.max(vehiculosActivos || 0, vehiculosActivosDesdeTrabajos);
+    const clientesEnProceso = semanaReiniciada ? clientesActivosDesdeTrabajos : Math.max(clientesActivos || 0, clientesActivosDesdeTrabajos);
+    const vehiculosEnProceso = semanaReiniciada ? vehiculosActivosDesdeTrabajos : Math.max(vehiculosActivos || 0, vehiculosActivosDesdeTrabajos);
+    const clientesAtendidosDashboard = semanaReiniciada ? trabajosMecanicosSemana.length : (clientesAtendidos || 0);
 
     setStats({
       clientesActivos: clientesEnProceso,
-      clientesAtendidos: clientesAtendidos || 0,
+      clientesAtendidos: clientesAtendidosDashboard,
       vehiculosActivos: vehiculosEnProceso,
-      trabajosActivos: trabajosMecanicosActivos.length,
+      trabajosActivos: trabajosMecanicosActivosDashboard.length,
       semana,
       mes,
       trabajosSemana,
@@ -799,6 +833,36 @@ function Dashboard() {
     alert("Reset semanal eliminado. El Dashboard volvió a mostrar la semana completa.");
   };
 
+
+  const resetearDashboardMensual = async () => {
+    const confirmar = confirm(
+      "¿Resetear los datos MENSUALES del Dashboard a 0?\n\nEsto NO borra clientes, vehículos, trabajos, facturas ni reportes. Solo hace que el Dashboard mensual empiece a contar desde este momento."
+    );
+
+    if (!confirmar) return;
+
+    const ahora = new Date().toISOString();
+    localStorage.setItem("pc_motors_dashboard_reset_mensual_desde", ahora);
+    setResetMensualDesde(ahora);
+
+    await cargarDashboard(false);
+    alert("Dashboard mensual reiniciado a 0 correctamente.");
+  };
+
+  const quitarResetMensualDashboard = async () => {
+    const confirmar = confirm(
+      "¿Quitar el reset mensual y volver a mostrar todos los datos reales de este mes?"
+    );
+
+    if (!confirmar) return;
+
+    localStorage.removeItem("pc_motors_dashboard_reset_mensual_desde");
+    setResetMensualDesde("");
+
+    await cargarDashboard(false);
+    alert("Reset mensual eliminado. El Dashboard volvió a mostrar el mes completo.");
+  };
+
   const trabajosFinalizadosVisibles = (stats.trabajosMecanicosSemana || []).filter((trabajo) => {
     const texto = `${trabajo.numero_factura || ""} ${trabajo.cliente_nombre || ""} ${trabajo.mecanico_nombre || ""} ${trabajo.vehiculo || ""}`.toLowerCase();
     return texto.includes(busquedaTrabajo.toLowerCase());
@@ -822,6 +886,9 @@ function Dashboard() {
         {resetSemanalDesde && (
           <span style={resetNoticeStyle}> Semana reiniciada desde: {new Date(resetSemanalDesde).toLocaleString()}</span>
         )}
+        {resetMensualDesde && (
+          <span style={resetNoticeStyle}> Mes reiniciado desde: {new Date(resetMensualDesde).toLocaleString()}</span>
+        )}
       </p>
 
       <div style={actionsBox}>
@@ -829,7 +896,11 @@ function Dashboard() {
         <button onClick={() => guardarReporte("mensual")} style={saveButton}>💾 Guardar Reporte Mensual</button>
         <button onClick={resetearDashboardSemanal} style={cleanButton}>♻️ Reset Semana</button>
         {resetSemanalDesde && (
-          <button onClick={quitarResetSemanalDashboard} style={undoButton}>↩️ Quitar Reset</button>
+          <button onClick={quitarResetSemanalDashboard} style={undoButton}>↩️ Quitar Reset Semana</button>
+        )}
+        <button onClick={resetearDashboardMensual} style={monthResetButton}>♻️ Reset Mes</button>
+        {resetMensualDesde && (
+          <button onClick={quitarResetMensualDashboard} style={undoButton}>↩️ Quitar Reset Mes</button>
         )}
         <button
           onClick={() => cargarDashboard(true)}
