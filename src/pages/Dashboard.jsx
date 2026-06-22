@@ -18,6 +18,9 @@ function Dashboard() {
   });
 
   const [ocultarTrabajosSemana, setOcultarTrabajosSemana] = useState(false);
+  const [resetSemanalDesde, setResetSemanalDesde] = useState(() =>
+    localStorage.getItem("pc_motors_dashboard_reset_semanal_desde") || ""
+  );
   const [refrescando, setRefrescando] = useState(false);
   const [busquedaTrabajo, setBusquedaTrabajo] = useState("");
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({
@@ -83,6 +86,23 @@ function Dashboard() {
   const inicioMes = () => {
     const hoy = new Date();
     return new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  };
+
+  const obtenerResetSemanalDesde = () => {
+    const valor = localStorage.getItem("pc_motors_dashboard_reset_semanal_desde");
+    const fecha = convertirFechaSupabase(valor);
+    if (!fecha || Number.isNaN(fecha.getTime())) return null;
+    return fecha;
+  };
+
+  const obtenerInicioSemanaDashboard = () => {
+    const inicioSemanaActual = inicioSemana();
+    const resetDesde = obtenerResetSemanalDesde();
+
+    // Si el reset fue dentro de esta semana, el Dashboard semanal empieza desde ese momento.
+    // Si el reset es viejo, se ignora automáticamente al comenzar una semana nueva.
+    if (resetDesde && resetDesde >= inicioSemanaActual) return resetDesde;
+    return inicioSemanaActual;
   };
 
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
@@ -442,7 +462,7 @@ function Dashboard() {
       return;
     }
 
-    const inicioSemanaActual = inicioSemana();
+    const inicioSemanaActual = obtenerInicioSemanaDashboard();
     const inicioMesActual = inicioMes();
 
     const trabajosSemana = [];
@@ -748,19 +768,35 @@ function Dashboard() {
     alert(tipo === "semanal" ? "Reporte semanal guardado correctamente" : "Reporte mensual guardado correctamente");
   };
 
-  const limpiarVistaDashboard = () => {
-    const totalVisible = stats.trabajosSemana.length + stats.trabajosMecanicosSemana.length;
+  const resetearDashboardSemanal = async () => {
+    const confirmar = confirm(
+      "¿Resetear los datos SEMANALES del Dashboard a 0?\n\nEsto NO borra clientes, vehículos, trabajos, facturas ni reportes. Solo hace que el Dashboard semanal empiece a contar desde este momento."
+    );
 
-    if (totalVisible === 0) {
-      alert("No hay trabajos visibles para limpiar.");
-      return;
-    }
-
-    const confirmar = confirm("Esto solo ocultará la lista visible de trabajos de esta semana. No borra clientes, historial ni reportes. ¿Continuar?");
     if (!confirmar) return;
 
-    setOcultarTrabajosSemana(true);
-    alert("Vista del Dashboard limpiada correctamente.");
+    const ahora = new Date().toISOString();
+    localStorage.setItem("pc_motors_dashboard_reset_semanal_desde", ahora);
+    setResetSemanalDesde(ahora);
+    setOcultarTrabajosSemana(false);
+
+    await cargarDashboard(false);
+    alert("Dashboard semanal reiniciado a 0 correctamente.");
+  };
+
+  const quitarResetSemanalDashboard = async () => {
+    const confirmar = confirm(
+      "¿Quitar el reset semanal y volver a mostrar todos los datos reales de esta semana?"
+    );
+
+    if (!confirmar) return;
+
+    localStorage.removeItem("pc_motors_dashboard_reset_semanal_desde");
+    setResetSemanalDesde("");
+    setOcultarTrabajosSemana(false);
+
+    await cargarDashboard(false);
+    alert("Reset semanal eliminado. El Dashboard volvió a mostrar la semana completa.");
   };
 
   const trabajosFinalizadosVisibles = (stats.trabajosMecanicosSemana || []).filter((trabajo) => {
@@ -781,12 +817,20 @@ function Dashboard() {
   return (
     <div style={pageBox}>
       <h1 style={titleStyle}>📊 Dashboard Financiero</h1>
-      <p style={subtitleStyle}>Resumen limpio de cobros reales, pagos pendientes y métodos de pago.</p>
+      <p style={subtitleStyle}>
+        Resumen limpio de cobros reales, pagos pendientes y métodos de pago.
+        {resetSemanalDesde && (
+          <span style={resetNoticeStyle}> Semana reiniciada desde: {new Date(resetSemanalDesde).toLocaleString()}</span>
+        )}
+      </p>
 
       <div style={actionsBox}>
         <button onClick={() => guardarReporte("semanal")} style={saveButton}>💾 Guardar Reporte Semanal</button>
         <button onClick={() => guardarReporte("mensual")} style={saveButton}>💾 Guardar Reporte Mensual</button>
-        <button onClick={limpiarVistaDashboard} style={cleanButton}>🧹 Limpiar Vista</button>
+        <button onClick={resetearDashboardSemanal} style={cleanButton}>♻️ Reset Semana</button>
+        {resetSemanalDesde && (
+          <button onClick={quitarResetSemanalDashboard} style={undoButton}>↩️ Quitar Reset</button>
+        )}
         <button
           onClick={() => cargarDashboard(true)}
           style={{ ...refreshButton, opacity: refrescando ? 0.7 : 1, cursor: refrescando ? "not-allowed" : "pointer" }}
@@ -1058,8 +1102,10 @@ const titleStyle = { color: "#f59e0b", fontSize: "42px", marginBottom: "8px" };
 const subtitleStyle = { color: "#d1d5db", fontSize: "16px" };
 const actionsBox = { display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "25px", marginBottom: "25px" };
 const saveButton = { padding: "12px 16px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
-const cleanButton = { padding: "12px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const cleanButton = { padding: "12px 16px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const undoButton = { padding: "12px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const refreshButton = { padding: "12px 16px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const resetNoticeStyle = { display: "inline-block", marginLeft: "10px", color: "#fca5a5", fontWeight: "bold" };
 const sectionTitle = { color: "#f59e0b", marginTop: "35px", marginBottom: "10px" };
 const gridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: "16px", marginTop: "14px" };
 const cardStyle = { background: "rgba(31, 41, 55, 0.95)", padding: "20px", borderRadius: "12px", border: "1px solid #f59e0b", boxShadow: "0 10px 25px rgba(0,0,0,0.25)" };
