@@ -15,7 +15,7 @@ import ManoObraPrecios from "./pages/ManoObraPrecios";
 import FirmaEstimadoCliente from "./pages/FirmaEstimadoCliente";
 import Login from "./pages/Login";
 import logoPC from "./assets/logo-pcmotors.png";
-
+import PanelMecanico from "./pages/PanelMecanico";
 function App() {
   const [page, setPage] = useState("dashboard");
   const [session, setSession] = useState(null);
@@ -160,6 +160,7 @@ function App() {
         {page === "control-trabajos-mecanicos" && <ControlTrabajosMecanicos />}
         {page === "reportes" && <Reportes />}
         {page === "reportes-mecanicos" && <ReportesMecanicos />}
+        {page === "panel-mecanico" && <PanelMecanico />}
       </main>
     </div>
   );

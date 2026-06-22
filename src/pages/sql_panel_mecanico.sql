@@ -1,0 +1,15 @@
+alter table trabajos_mecanicos
+add column if not exists creado_por text default 'admin',
+add column if not exists origen text default 'sistema',
+add column if not exists anio text,
+add column if not exists marca text,
+add column if not exists modelo text,
+add column if not exists motor text,
+add column if not exists trim text,
+add column if not exists tipo_vehiculo text,
+add column if not exists placa text,
+add column if not exists vin text,
+add column if not exists color text,
+add column if not exists millaje text,
+add column if not exists telefono_cliente text,
+add column if not exists notas_mecanico text;
