@@ -81,6 +81,10 @@ function Login() {
           </button>
         </form>
 
+        <button onClick={() => (window.location.href = "/")} style={backButton}>
+          ⬅ Volver al inicio
+        </button>
+
         <p style={smallText}>Solo personal autorizado de PC Motors.</p>
       </div>
     </div>
@@ -174,6 +178,19 @@ const buttonStyle = {
   fontSize: "16px",
   cursor: "pointer",
   marginTop: "5px"
+};
+
+const backButton = {
+  width: "100%",
+  padding: "12px",
+  background: "transparent",
+  color: "#f59e0b",
+  border: "1px solid #f59e0b",
+  borderRadius: "10px",
+  fontWeight: "bold",
+  fontSize: "14px",
+  cursor: "pointer",
+  marginTop: "12px"
 };
 
 const errorStyle = {

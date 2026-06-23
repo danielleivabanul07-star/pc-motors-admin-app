@@ -19,6 +19,8 @@ import PanelMecanico from "./pages/PanelMecanico";
 import Citas from "./pages/Citas";
 import SolicitarCita from "./pages/SolicitarCita";
 import ConfirmarCita from "./pages/ConfirmarCita";
+import InicioAcceso from "./pages/InicioAcceso";
+import EstadoCliente from "./pages/EstadoCliente";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -28,6 +30,9 @@ function App() {
 
   const path = window.location.pathname;
 
+  const esInicio = path === "/";
+  const esAdmin = path === "/admin" || path === "/administrador";
+
   const esFirmaEstimado = path.startsWith("/firma-estimado/");
   const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
 
@@ -35,8 +40,15 @@ function App() {
   const tokenConfirmarCita = esConfirmarCita ? path.replace("/confirmar-cita/", "") : "";
 
   const esRegistroPublico = path === "/registro-publico";
-  const esSolicitudCitaPublica = path === "/solicitar-cita" || path === "/cita" || path === "/citas-publico";
+  const esSolicitudCitaPublica =
+    path === "/solicitar-cita" || path === "/cita" || path === "/citas-publico";
+
   const esPanelMecanico = path === "/taller";
+  const esEstadoCliente =
+    path === "/estado-cliente" ||
+    path === "/cliente" ||
+    path === "/mi-carro" ||
+    path === "/estado";
 
   useEffect(() => {
     const detectarTamano = () => setEsMovil(window.innerWidth <= 768);
@@ -75,6 +87,7 @@ function App() {
     await supabase.auth.signOut();
     setSession(null);
     setPage("dashboard");
+    window.location.href = "/";
   };
 
   if (esFirmaEstimado) {
@@ -95,6 +108,18 @@ function App() {
 
   if (esPanelMecanico) {
     return <PanelMecanico />;
+  }
+
+  if (esEstadoCliente) {
+    return <EstadoCliente />;
+  }
+
+  if (esInicio) {
+    return <InicioAcceso />;
+  }
+
+  if (!esAdmin && !session) {
+    return <InicioAcceso />;
   }
 
   if (cargandoAuth) {
