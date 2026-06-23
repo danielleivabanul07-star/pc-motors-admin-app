@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../services/supabase";
+import { obtenerTokenNotificaciones } from "../services/firebase";
 
 function Dashboard() {
   const [stats, setStats] = useState({
@@ -217,6 +218,53 @@ function Dashboard() {
       alert("Notificaciones activadas correctamente en este dispositivo.");
     } else {
       alert("No se activaron las notificaciones. Revisa los permisos del navegador.");
+    }
+  };
+
+  const registrarDispositivoPush = async () => {
+    try {
+      if (!("serviceWorker" in navigator)) {
+        alert("Este dispositivo no soporta Service Worker para push notifications.");
+        return;
+      }
+
+      const token = await obtenerTokenNotificaciones();
+
+      if (!token) {
+        alert("No se pudo obtener el token push de este dispositivo.");
+        return;
+      }
+
+      const dispositivo = /iphone|ipad|ipod/i.test(navigator.userAgent)
+        ? "iPhone / iPad"
+        : /android/i.test(navigator.userAgent)
+          ? "Android"
+          : "PC / Navegador";
+
+      const { error } = await supabase
+        .from("dispositivos_push")
+        .upsert(
+          {
+            token,
+            nombre_dispositivo: dispositivo,
+            user_agent: navigator.userAgent,
+            activo: true,
+            actualizado_en: new Date().toISOString()
+          },
+          { onConflict: "token" }
+        );
+
+      if (error) {
+        console.log("Error guardando token push:", error);
+        alert(JSON.stringify(error, null, 2));
+        return;
+      }
+
+      localStorage.setItem("pc_motors_push_token", token);
+      alert("Dispositivo registrado correctamente para recibir notificaciones push.");
+    } catch (error) {
+      console.log("Error registrando dispositivo push:", error);
+      alert("Error registrando este dispositivo para push notifications.");
     }
   };
 
@@ -1214,10 +1262,11 @@ function Dashboard() {
           onClick={async () => {
             await activarSonidoNotificaciones();
             await pedirPermisoNotificaciones();
+            await registrarDispositivoPush();
           }}
           style={notifyButton}
         >
-          🔔 Activar sonido y notificaciones
+          🔔 Activar sonido, notificaciones y push
         </button>
         <button
           onClick={desactivarSonidoNotificaciones}
@@ -1252,7 +1301,7 @@ function Dashboard() {
               }}
               style={notifySmallButton}
             >
-              🔔 Sonido / permisos
+              🔔 Sonido / permisos / push
             </button>
           </div>
         </div>
