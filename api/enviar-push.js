@@ -1,10 +1,11 @@
-import admin from "firebase-admin";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "{}");
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+if (!getApps().length) {
+  initializeApp({
+    credential: cert(serviceAccount)
   });
 }
 
@@ -12,11 +13,11 @@ export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({
-        error: "Método no permitido"
+        error: "Método no permitido. Usa POST."
       });
     }
 
-    const { token, titulo, mensaje } = req.body;
+    const { token, titulo, mensaje } = req.body || {};
 
     if (!token) {
       return res.status(400).json({
@@ -24,11 +25,14 @@ export default async function handler(req, res) {
       });
     }
 
-    const response = await admin.messaging().send({
+    const response = await getMessaging().send({
       token,
       notification: {
         title: titulo || "PC Motors",
         body: mensaje || "Nueva notificación"
+      },
+      data: {
+        url: "/"
       }
     });
 
@@ -37,10 +41,11 @@ export default async function handler(req, res) {
       messageId: response
     });
   } catch (error) {
-    console.error(error);
+    console.error("ERROR ENVIAR PUSH:", error);
 
     return res.status(500).json({
-      error: error.message
+      ok: false,
+      error: error?.message || "Error desconocido"
     });
   }
 }
