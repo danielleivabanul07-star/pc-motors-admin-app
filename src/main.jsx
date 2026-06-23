@@ -10,14 +10,17 @@ createRoot(document.getElementById("root")).render(
 );
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/service-worker.js")
-      .then(() => {
-        console.log("Service Worker registrado correctamente");
-      })
-      .catch((error) => {
-        console.log("Error registrando Service Worker:", error);
-      });
+  window.addEventListener("load", async () => {
+    try {
+      const registroPWA = await navigator.serviceWorker.register("/service-worker.js");
+      console.log("Service Worker PWA registrado correctamente:", registroPWA);
+
+      const registroFirebase = await navigator.serviceWorker.register(
+        "/firebase-messaging-sw.js"
+      );
+      console.log("Service Worker Firebase registrado correctamente:", registroFirebase);
+    } catch (error) {
+      console.log("Error registrando Service Worker:", error);
+    }
   });
 }
