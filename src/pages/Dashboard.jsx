@@ -30,12 +30,22 @@ function Dashboard() {
   const [refrescando, setRefrescando] = useState(false);
   const [busquedaTrabajo, setBusquedaTrabajo] = useState("");
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({
+    notificaciones: true,
     resumen: true,
     metodos: true,
     pendientes: false,
     semana: false,
     mes: false,
     trabajos: false
+  });
+
+  const [notificaciones, setNotificaciones] = useState([]);
+  const [notificacionesLeidas, setNotificacionesLeidas] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("pc_motors_notificaciones_leidas") || "[]");
+    } catch {
+      return [];
+    }
   });
 
   useEffect(() => {
@@ -50,6 +60,29 @@ function Dashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "trabajos_mecanicos" }, () => cargarDashboard(false))
       .on("postgres_changes", { event: "*", schema: "public", table: "facturas_trabajos" }, () => cargarDashboard(false))
       .on("postgres_changes", { event: "*", schema: "public", table: "reportes_financieros" }, () => cargarDashboard(false))
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "solicitudes_clientes" }, (payload) => {
+        const cliente = payload.new || {};
+        reproducirSonidoNotificacion();
+        mostrarNotificacionNavegador(
+          "Nuevo cliente registrado",
+          `${cliente.nombre_cliente || "Cliente"} - ${cliente.anio || ""} ${cliente.marca || ""} ${cliente.modelo || ""}`.trim()
+        );
+        cargarDashboard(false);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trabajos_mecanicos" }, (payload) => {
+        const anterior = contarPiezasEstimado(payload.old?.estimado_piezas);
+        const nuevo = contarPiezasEstimado(payload.new?.estimado_piezas);
+
+        if (nuevo > anterior) {
+          reproducirSonidoNotificacion();
+          mostrarNotificacionNavegador(
+            "Nueva pieza solicitada",
+            `${payload.new?.mecanico_nombre || "Mecánico"} pidió pieza para ${payload.new?.cliente_nombre || "cliente"}`
+          );
+        }
+
+        cargarDashboard(false);
+      })
       .subscribe();
 
     return () => {
@@ -65,6 +98,159 @@ function Dashboard() {
   };
 
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
+
+  const parsearArraySeguro = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const contarPiezasEstimado = (valor) => parsearArraySeguro(valor).filter((pieza) => {
+    return String(pieza?.nombre || pieza?.name || "").trim();
+  }).length;
+
+  const reproducirSonidoNotificacion = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      const audio = new AudioContext();
+      const oscilador = audio.createOscillator();
+      const ganancia = audio.createGain();
+
+      oscilador.type = "sine";
+      oscilador.frequency.setValueAtTime(880, audio.currentTime);
+      ganancia.gain.setValueAtTime(0.0001, audio.currentTime);
+      ganancia.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + 0.03);
+      ganancia.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.45);
+
+      oscilador.connect(ganancia);
+      ganancia.connect(audio.destination);
+      oscilador.start();
+      oscilador.stop(audio.currentTime + 0.5);
+    } catch (error) {
+      console.log("No se pudo reproducir sonido de notificación:", error);
+    }
+  };
+
+  const pedirPermisoNotificaciones = async () => {
+    if (!("Notification" in window)) {
+      alert("Este navegador no soporta notificaciones.");
+      return;
+    }
+
+    const permiso = await Notification.requestPermission();
+
+    if (permiso === "granted") {
+      alert("Notificaciones activadas correctamente en este dispositivo.");
+    } else {
+      alert("No se activaron las notificaciones. Revisa los permisos del navegador.");
+    }
+  };
+
+  const mostrarNotificacionNavegador = (titulo, cuerpo) => {
+    try {
+      if (!("Notification" in window)) return;
+      if (Notification.permission !== "granted") return;
+
+      new Notification(`PC Motors - ${titulo}`, {
+        body: cuerpo || "",
+        icon: "/logo-pcmotors.png",
+        badge: "/logo-pcmotors.png"
+      });
+    } catch (error) {
+      console.log("No se pudo mostrar notificación del navegador:", error);
+    }
+  };
+
+  const guardarNotificacionesLeidas = (ids) => {
+    const unicos = [...new Set(ids)];
+    setNotificacionesLeidas(unicos);
+    localStorage.setItem("pc_motors_notificaciones_leidas", JSON.stringify(unicos));
+  };
+
+  const marcarNotificacionLeida = (id) => {
+    guardarNotificacionesLeidas([...(notificacionesLeidas || []), id]);
+  };
+
+  const marcarTodasNotificacionesLeidas = () => {
+    guardarNotificacionesLeidas((notificaciones || []).map((notificacion) => notificacion.id));
+  };
+
+  const construirNotificacionesDashboard = (solicitudes = [], trabajosMecanicos = []) => {
+    const lista = [];
+
+    (solicitudes || []).forEach((solicitud) => {
+      const fecha = convertirFechaSupabase(solicitud.creado_en || solicitud.created_at);
+      const vehiculo = `${solicitud.anio || ""} ${solicitud.marca || ""} ${solicitud.modelo || ""}`.trim();
+
+      lista.push({
+        id: `cliente-${solicitud.id}`,
+        tipo: "cliente",
+        titulo: "👤 Cliente nuevo registrado",
+        detalle: `${solicitud.nombre_cliente || "Cliente sin nombre"}${vehiculo ? ` - ${vehiculo}` : ""}`,
+        extra: solicitud.problema || "Solicitud de servicio registrada desde el teléfono.",
+        fecha: fecha ? fecha.toISOString() : "",
+        prioridad: 1
+      });
+    });
+
+    (trabajosMecanicos || []).forEach((trabajo) => {
+      const piezas = parsearArraySeguro(trabajo.estimado_piezas)
+        .filter((pieza) => String(pieza?.nombre || pieza?.name || "").trim());
+
+      piezas.forEach((pieza, index) => {
+        const fecha = convertirFechaSupabase(trabajo.actualizado_en || trabajo.updated_at || trabajo.creado_en || trabajo.hora_inicio);
+        const cantidad = Number(pieza.cantidad || pieza.qty || 1);
+        const costo = Number(pieza.costo || pieza.costo_real || 0);
+        const venta = Number(pieza.venta || pieza.precio_venta || pieza.precio_cliente || 0);
+
+        lista.push({
+          id: `pieza-${trabajo.id}-${pieza.id || index}`,
+          tipo: "pieza",
+          titulo: "📦 Pieza solicitada por mecánico",
+          detalle: `${pieza.nombre || pieza.name} x${cantidad} - ${trabajo.cliente_nombre || "Cliente no registrado"}`,
+          extra: `${trabajo.mecanico_nombre || trabajo.creado_por || "Mecánico"} / ${trabajo.vehiculo || `${trabajo.anio || ""} ${trabajo.marca || ""} ${trabajo.modelo || ""}`.trim() || "Vehículo no registrado"}${costo || venta ? ` / Costo ${dinero(costo)} / Venta ${dinero(venta)}` : ""}`,
+          fecha: fecha ? fecha.toISOString() : "",
+          prioridad: 2
+        });
+      });
+    });
+
+    return lista
+      .sort((a, b) => {
+        const fechaA = a.fecha ? new Date(a.fecha).getTime() : 0;
+        const fechaB = b.fecha ? new Date(b.fecha).getTime() : 0;
+        return fechaB - fechaA || a.prioridad - b.prioridad;
+      })
+      .slice(0, 25);
+  };
+
+  const formatearFechaNotificacion = (valor) => {
+    if (!valor) return "Sin fecha";
+    const fecha = convertirFechaSupabase(valor);
+    if (!fecha || Number.isNaN(fecha.getTime())) return "Fecha inválida";
+
+    return fecha.toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+  };
+
+  const notificacionesPendientes = notificaciones.filter(
+    (notificacion) => !notificacionesLeidas.includes(notificacion.id)
+  );
 
   const porcentaje = (valor, total) => {
     const totalNumero = Number(total || 0);
@@ -512,6 +698,19 @@ function Dashboard() {
       return;
     }
 
+    const { data: solicitudesClientesRaw, error: errorSolicitudesClientes } = await supabase
+      .from("solicitudes_clientes")
+      .select("*")
+      .order("id", { ascending: false })
+      .limit(25);
+
+    if (errorSolicitudesClientes) {
+      console.log("No se pudieron cargar solicitudes para notificaciones:", errorSolicitudesClientes);
+      setNotificaciones(construirNotificacionesDashboard([], trabajosMecanicos));
+    } else {
+      setNotificaciones(construirNotificacionesDashboard(solicitudesClientesRaw || [], trabajosMecanicos));
+    }
+
     const trabajosSemana = [];
     const trabajosMes = [];
 
@@ -945,7 +1144,72 @@ function Dashboard() {
         >
           {refrescando ? "Refrescando..." : "🔄 Refrescar"}
         </button>
+        <button onClick={pedirPermisoNotificaciones} style={notifyButton}>
+          🔔 Activar notificaciones
+        </button>
       </div>
+
+      <Panel
+        titulo={`🔔 Centro de Notificaciones (${notificacionesPendientes.length} pendientes)`}
+        abierto={seccionesAbiertas.notificaciones}
+        onToggle={() => alternarSeccion("notificaciones")}
+      >
+        <div style={notificationTopBox}>
+          <div>
+            <strong style={{ color: "#f59e0b" }}>{notificacionesPendientes.length}</strong>{" "}
+            pendientes / {notificaciones.length} recientes
+          </div>
+          <div style={notificationActionsBox}>
+            <button onClick={marcarTodasNotificacionesLeidas} style={markAllButton}>
+              ✅ Marcar todo como leído
+            </button>
+            <button onClick={pedirPermisoNotificaciones} style={notifySmallButton}>
+              🔔 Permisos
+            </button>
+          </div>
+        </div>
+
+        {notificaciones.length === 0 ? (
+          <div style={emptyStyle}>No hay notificaciones recientes.</div>
+        ) : (
+          <div style={notificationListBox}>
+            {notificaciones.map((notificacion) => {
+              const leida = notificacionesLeidas.includes(notificacion.id);
+
+              return (
+                <div
+                  key={notificacion.id}
+                  style={{
+                    ...notificationCard,
+                    borderColor: leida ? "#374151" : "#f59e0b",
+                    opacity: leida ? 0.72 : 1
+                  }}
+                >
+                  <div>
+                    <div style={notificationHeaderRow}>
+                      <strong style={{ color: leida ? "#d1d5db" : "#f59e0b" }}>
+                        {notificacion.titulo}
+                      </strong>
+                      {!leida && <span style={newBadge}>Nuevo</span>}
+                    </div>
+                    <p style={compactText}>{notificacion.detalle}</p>
+                    <p style={notificationExtraText}>{notificacion.extra}</p>
+                    <p style={notificationDateText}>{formatearFechaNotificacion(notificacion.fecha)}</p>
+                  </div>
+
+                  <button
+                    onClick={() => marcarNotificacionLeida(notificacion.id)}
+                    style={leida ? disabledReadButton : readButton}
+                    disabled={leida}
+                  >
+                    {leida ? "Leído" : "Marcar leído"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
 
       <Panel
         titulo="📌 Resumen General"
@@ -1319,6 +1583,117 @@ const adjustButton = {
   borderRadius: "8px",
   cursor: "pointer",
   fontWeight: "bold"
+};
+
+const notifyButton = {
+  padding: "12px 16px",
+  background: "#0ea5e9",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const notificationTopBox = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  background: "rgba(17, 24, 39, 0.9)",
+  border: "1px solid #374151",
+  borderRadius: "12px",
+  padding: "14px",
+  marginBottom: "14px",
+  color: "white"
+};
+
+const notificationActionsBox = {
+  display: "flex",
+  gap: "10px",
+  flexWrap: "wrap"
+};
+
+const markAllButton = {
+  padding: "10px 12px",
+  background: "#16a34a",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const notifySmallButton = {
+  padding: "10px 12px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const notificationListBox = {
+  display: "grid",
+  gap: "12px"
+};
+
+const notificationCard = {
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: "14px",
+  alignItems: "center",
+  background: "rgba(31, 41, 55, 0.95)",
+  border: "1px solid #f59e0b",
+  borderRadius: "12px",
+  padding: "14px"
+};
+
+const notificationHeaderRow = {
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap"
+};
+
+const newBadge = {
+  background: "#dc2626",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "bold"
+};
+
+const notificationExtraText = {
+  margin: "6px 0",
+  color: "#e5e7eb",
+  lineHeight: "1.35"
+};
+
+const notificationDateText = {
+  margin: "4px 0 0 0",
+  color: "#9ca3af",
+  fontSize: "12px"
+};
+
+const readButton = {
+  padding: "10px 12px",
+  background: "#f59e0b",
+  color: "#111827",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const disabledReadButton = {
+  ...readButton,
+  background: "#374151",
+  color: "#9ca3af",
+  cursor: "not-allowed"
 };
 
 
