@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../services/supabase";
 
 function Dashboard() {
@@ -47,6 +47,11 @@ function Dashboard() {
       return [];
     }
   });
+
+  const audioContextRef = useRef(null);
+  const [sonidoActivado, setSonidoActivado] = useState(() =>
+    localStorage.getItem("pc_motors_sonido_notificaciones_activo") === "true"
+  );
 
   useEffect(() => {
     cargarDashboard(false);
@@ -115,28 +120,89 @@ function Dashboard() {
     return String(pieza?.nombre || pieza?.name || "").trim();
   }).length;
 
-  const reproducirSonidoNotificacion = () => {
-    try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return;
+  const obtenerAudioContext = () => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
 
-      const audio = new AudioContext();
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+
+    return audioContextRef.current;
+  };
+
+  const reproducirSonidoNotificacion = async () => {
+    try {
+      if (!sonidoActivado) return;
+
+      const audio = obtenerAudioContext();
+      if (!audio) return;
+
+      if (audio.state === "suspended") {
+        await audio.resume();
+      }
+
       const oscilador = audio.createOscillator();
       const ganancia = audio.createGain();
 
       oscilador.type = "sine";
       oscilador.frequency.setValueAtTime(880, audio.currentTime);
+      oscilador.frequency.setValueAtTime(660, audio.currentTime + 0.18);
+
       ganancia.gain.setValueAtTime(0.0001, audio.currentTime);
-      ganancia.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + 0.03);
-      ganancia.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.45);
+      ganancia.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.03);
+      ganancia.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.8);
 
       oscilador.connect(ganancia);
       ganancia.connect(audio.destination);
       oscilador.start();
-      oscilador.stop(audio.currentTime + 0.5);
+      oscilador.stop(audio.currentTime + 0.85);
     } catch (error) {
       console.log("No se pudo reproducir sonido de notificación:", error);
     }
+  };
+
+  const activarSonidoNotificaciones = async () => {
+    try {
+      const audio = obtenerAudioContext();
+
+      if (!audio) {
+        alert("Este navegador no soporta sonido de notificaciones.");
+        return;
+      }
+
+      if (audio.state === "suspended") {
+        await audio.resume();
+      }
+
+      localStorage.setItem("pc_motors_sonido_notificaciones_activo", "true");
+      setSonidoActivado(true);
+
+      const oscilador = audio.createOscillator();
+      const ganancia = audio.createGain();
+
+      oscilador.type = "sine";
+      oscilador.frequency.setValueAtTime(900, audio.currentTime);
+      ganancia.gain.setValueAtTime(0.0001, audio.currentTime);
+      ganancia.gain.exponentialRampToValueAtTime(0.35, audio.currentTime + 0.03);
+      ganancia.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.5);
+
+      oscilador.connect(ganancia);
+      ganancia.connect(audio.destination);
+      oscilador.start();
+      oscilador.stop(audio.currentTime + 0.55);
+
+      alert("Sonido de alertas activado correctamente.");
+    } catch (error) {
+      console.log("No se pudo activar el sonido:", error);
+      alert("No se pudo activar el sonido en este navegador.");
+    }
+  };
+
+  const desactivarSonidoNotificaciones = () => {
+    localStorage.setItem("pc_motors_sonido_notificaciones_activo", "false");
+    setSonidoActivado(false);
+    alert("Sonido de alertas desactivado.");
   };
 
   const pedirPermisoNotificaciones = async () => {
@@ -1144,8 +1210,21 @@ function Dashboard() {
         >
           {refrescando ? "Refrescando..." : "🔄 Refrescar"}
         </button>
-        <button onClick={pedirPermisoNotificaciones} style={notifyButton}>
-          🔔 Activar notificaciones
+        <button
+          onClick={async () => {
+            await activarSonidoNotificaciones();
+            await pedirPermisoNotificaciones();
+          }}
+          style={notifyButton}
+        >
+          🔔 Activar sonido y notificaciones
+        </button>
+        <button
+          onClick={desactivarSonidoNotificaciones}
+          style={soundOffButton}
+          disabled={!sonidoActivado}
+        >
+          🔇 Silenciar sonido
         </button>
       </div>
 
@@ -1158,13 +1237,22 @@ function Dashboard() {
           <div>
             <strong style={{ color: "#f59e0b" }}>{notificacionesPendientes.length}</strong>{" "}
             pendientes / {notificaciones.length} recientes
+            <span style={soundStatusStyle}>
+              {sonidoActivado ? "🔊 Sonido activo" : "🔇 Sonido apagado"}
+            </span>
           </div>
           <div style={notificationActionsBox}>
             <button onClick={marcarTodasNotificacionesLeidas} style={markAllButton}>
               ✅ Marcar todo como leído
             </button>
-            <button onClick={pedirPermisoNotificaciones} style={notifySmallButton}>
-              🔔 Permisos
+            <button
+              onClick={async () => {
+                await activarSonidoNotificaciones();
+                await pedirPermisoNotificaciones();
+              }}
+              style={notifySmallButton}
+            >
+              🔔 Sonido / permisos
             </button>
           </div>
         </div>
@@ -1592,6 +1680,23 @@ const notifyButton = {
   border: "none",
   borderRadius: "8px",
   cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const soundOffButton = {
+  padding: "12px 16px",
+  background: "#475569",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontWeight: "bold"
+};
+
+const soundStatusStyle = {
+  display: "inline-block",
+  marginLeft: "12px",
+  color: "#93c5fd",
   fontWeight: "bold"
 };
 
