@@ -192,6 +192,23 @@ function PanelMecanico() {
   const limpiarTexto = (valor) => String(valor || "").trim();
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
 
+  const enviarPush = async ({ titulo, mensaje, url = "/" }) => {
+    try {
+      const respuesta = await fetch("/api/enviar-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo, mensaje, url })
+      });
+
+      if (!respuesta.ok) {
+        const resultado = await respuesta.json().catch(() => null);
+        console.log("Push no enviado:", resultado);
+      }
+    } catch (error) {
+      console.log("Error enviando push:", error);
+    }
+  };
+
   const parsearJsonArray = (valor) => {
     if (Array.isArray(valor)) return valor;
     if (!valor) return [];
@@ -393,6 +410,12 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       return;
     }
 
+    await enviarPush({
+      titulo: "🚘 Vehículo registrado por mecánico",
+      mensaje: `${vehiculoTexto || "Vehículo"} - ${cliente} / Mecánico: ${mecanico}`,
+      url: "/"
+    });
+
     alert("Trabajo creado correctamente. Ahora aparece en tus trabajos activos y en el sistema principal.");
 
     setForm({
@@ -583,6 +606,32 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       alert(JSON.stringify(error, null, 2));
       setGuardandoTrabajo(false);
       return;
+    }
+
+    const piezasAnteriores = parsearJsonArray(trabajoSeleccionado.estimado_piezas)
+      .map(normalizarPieza)
+      .filter((pieza) => pieza.nombre);
+
+    const nombresAnteriores = new Set(
+      piezasAnteriores.map((pieza) => String(pieza.nombre || "").trim().toLowerCase())
+    );
+
+    const piezasNuevas = piezas.filter((pieza) => {
+      const nombre = String(pieza.nombre || "").trim().toLowerCase();
+      return nombre && !nombresAnteriores.has(nombre);
+    });
+
+    if (piezasNuevas.length > 0) {
+      const listaPiezas = piezasNuevas
+        .slice(0, 4)
+        .map((pieza) => `${pieza.nombre} x${pieza.cantidad || 1}`)
+        .join(", ");
+
+      await enviarPush({
+        titulo: "🔧 Solicitud de piezas",
+        mensaje: `${form.mecanico_nombre || editForm.mecanico_nombre || "Mecánico"} solicitó: ${listaPiezas} / ${editForm.cliente_nombre || "Cliente"}`,
+        url: "/"
+      });
     }
 
     alert("Trabajo actualizado correctamente. El administrador ya puede verlo en Control Trabajos.");

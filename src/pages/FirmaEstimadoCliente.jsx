@@ -24,6 +24,23 @@ export default function FirmaEstimadoCliente({ token }) {
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
 
+  const enviarPush = async ({ titulo, mensaje, url = "/" }) => {
+    try {
+      const respuesta = await fetch("/api/enviar-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo, mensaje, url })
+      });
+
+      if (!respuesta.ok) {
+        const resultado = await respuesta.json().catch(() => null);
+        console.log("Push no enviado:", resultado);
+      }
+    } catch (error) {
+      console.log("Error enviando push:", error);
+    }
+  };
+
   const parsearArray = (valor) => {
     if (Array.isArray(valor)) return valor;
     if (!valor) return [];
@@ -312,6 +329,12 @@ export default function FirmaEstimadoCliente({ token }) {
       setGuardando(false);
       return;
     }
+
+    await enviarPush({
+      titulo: "✅ Estimado aprobado",
+      mensaje: `${trabajo.cliente_nombre || nombre} aprobó ${dinero(lineasCliente.totalGenerado)} - ${trabajo.vehiculo || "Vehículo"}`,
+      url: "/"
+    });
 
     setGuardando(false);
     alert("Estimado aprobado y firmado correctamente. Gracias.");

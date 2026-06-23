@@ -7,6 +7,7 @@ function Sidebar({ page, setPage }) {
     { id: "historial", label: "📁 Historial" },
     { id: "solicitudes", label: "📥 Solicitudes" },
     { id: "registro", label: "📱 Registro Cliente" },
+    { id: "citas", label: "📅 Citas" },
     { id: "archivo", label: "🗄 Archivo Histórico" },
     { id: "mecanicos", label: "🔧 Mecánicos" },
 

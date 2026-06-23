@@ -16,6 +16,8 @@ import FirmaEstimadoCliente from "./pages/FirmaEstimadoCliente";
 import Login from "./pages/Login";
 import logoPC from "./assets/logo-pcmotors.png";
 import PanelMecanico from "./pages/PanelMecanico";
+import Citas from "./pages/Citas";
+import SolicitarCita from "./pages/SolicitarCita";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -29,6 +31,7 @@ function App() {
   const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
 
   const esRegistroPublico = path === "/registro-publico";
+  const esSolicitudCitaPublica = path === "/solicitar-cita" || path === "/cita" || path === "/citas-publico";
   const esPanelMecanico = path === "/taller";
 
   useEffect(() => {
@@ -76,6 +79,10 @@ function App() {
 
   if (esRegistroPublico) {
     return <RegistroCliente />;
+  }
+
+  if (esSolicitudCitaPublica) {
+    return <SolicitarCita />;
   }
 
   if (esPanelMecanico) {
@@ -157,6 +164,7 @@ function App() {
         {page === "clientes" && <Clientes />}
         {page === "solicitudes" && <Solicitudes />}
         {page === "registro" && <RegistroCliente />}
+        {page === "citas" && <Citas />}
         {page === "historial" && <Historial />}
         {page === "archivo" && <ArchivoHistorico />}
         {page === "mecanicos" && <Mecanicos />}

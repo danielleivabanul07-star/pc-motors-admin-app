@@ -22,6 +22,29 @@ export default function RegistroCliente() {
 
   const [guardando, setGuardando] = useState(false);
 
+  const enviarPushClienteNuevo = async (payload) => {
+    try {
+      const vehiculo = `${payload.anio || ""} ${payload.marca || ""} ${payload.modelo || ""}`.trim();
+
+      const respuesta = await fetch("/api/enviar-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titulo: "🚗 Nuevo cliente registrado",
+          mensaje: `${payload.nombre_cliente}${vehiculo ? ` - ${vehiculo}` : ""}`,
+          url: "/"
+        })
+      });
+
+      if (!respuesta.ok) {
+        const resultado = await respuesta.json().catch(() => null);
+        console.log("Push cliente nuevo no enviado:", resultado);
+      }
+    } catch (error) {
+      console.log("No se pudo enviar push de cliente nuevo:", error);
+    }
+  };
+
   const guardarSolicitud = async () => {
     if (!form.nombre_cliente.trim()) {
       alert("Por favor escribe el nombre del cliente.");
@@ -85,6 +108,8 @@ export default function RegistroCliente() {
     }
 
     console.log("Solicitud guardada:", data);
+
+    await enviarPushClienteNuevo(payload);
 
     alert("Solicitud enviada correctamente");
 
