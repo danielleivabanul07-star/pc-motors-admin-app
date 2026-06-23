@@ -163,13 +163,13 @@ function Dashboard() {
     }
   };
 
-  const activarSonidoNotificaciones = async () => {
+  const activarSonidoNotificaciones = async (mostrarAlerta = true) => {
     try {
       const audio = obtenerAudioContext();
 
       if (!audio) {
-        alert("Este navegador no soporta sonido de notificaciones.");
-        return;
+        if (mostrarAlerta) alert("Este navegador no soporta sonido de notificaciones.");
+        return false;
       }
 
       if (audio.state === "suspended") {
@@ -193,10 +193,12 @@ function Dashboard() {
       oscilador.start();
       oscilador.stop(audio.currentTime + 0.55);
 
-      alert("Sonido de alertas activado correctamente.");
+      if (mostrarAlerta) alert("Sonido de alertas activado correctamente.");
+      return true;
     } catch (error) {
       console.log("No se pudo activar el sonido:", error);
-      alert("No se pudo activar el sonido en este navegador.");
+      if (mostrarAlerta) alert("No se pudo activar el sonido en este navegador.");
+      return false;
     }
   };
 
@@ -207,17 +209,35 @@ function Dashboard() {
   };
 
   const pedirPermisoNotificaciones = async () => {
-    if (!("Notification" in window)) {
-      alert("Este navegador no soporta notificaciones.");
-      return;
-    }
+    try {
+      if (!("Notification" in window)) {
+        alert("Este navegador no soporta notificaciones.");
+        return false;
+      }
 
-    const permiso = await Notification.requestPermission();
+      if (Notification.permission === "granted") {
+        alert("Notificaciones ya están activadas correctamente en este dispositivo.");
+        return true;
+      }
 
-    if (permiso === "granted") {
-      alert("Notificaciones activadas correctamente en este dispositivo.");
-    } else {
+      if (Notification.permission === "denied") {
+        alert("Las notificaciones están bloqueadas para esta app. Actívalas desde Configuración > Notificaciones > PC Motors.");
+        return false;
+      }
+
+      const permiso = await Notification.requestPermission();
+
+      if (permiso === "granted") {
+        alert("Notificaciones activadas correctamente en este dispositivo.");
+        return true;
+      }
+
       alert("No se activaron las notificaciones. Revisa los permisos del navegador.");
+      return false;
+    } catch (error) {
+      console.log("Error pidiendo permiso de notificaciones:", error);
+      alert("No se pudo solicitar el permiso de notificaciones.");
+      return false;
     }
   };
 
@@ -267,6 +287,13 @@ function Dashboard() {
       console.log("Error registrando dispositivo push:", error);
       alert("Error registrando este dispositivo para push notifications.");
     }
+  };
+
+  const activarSonidoPermisosPush = async () => {
+    // En iPhone/iPad la solicitud de permiso push debe ocurrir primero y directo desde el toque del usuario.
+    // Por eso NO mostramos alertas de sonido antes de obtener/guardar el token.
+    await registrarDispositivoPush();
+    await activarSonidoNotificaciones(false);
   };
 
   const mostrarNotificacionNavegador = (titulo, cuerpo) => {
@@ -1260,11 +1287,7 @@ function Dashboard() {
           {refrescando ? "Refrescando..." : "🔄 Refrescar"}
         </button>
         <button
-          onClick={async () => {
-            await activarSonidoNotificaciones();
-            await pedirPermisoNotificaciones();
-            await registrarDispositivoPush();
-          }}
+          onClick={activarSonidoPermisosPush}
           style={notifyButton}
         >
           🔔 Activar sonido, notificaciones y push
@@ -1296,10 +1319,7 @@ function Dashboard() {
               ✅ Marcar todo como leído
             </button>
             <button
-              onClick={async () => {
-                await activarSonidoNotificaciones();
-                await pedirPermisoNotificaciones();
-              }}
+              onClick={activarSonidoPermisosPush}
               style={notifySmallButton}
             >
               🔔 Sonido / permisos / push
