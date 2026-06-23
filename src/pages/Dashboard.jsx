@@ -241,15 +241,16 @@ function Dashboard() {
           ? "Android"
           : "PC / Navegador";
 
+      // IMPORTANTE:
+      // Solo guardamos columnas básicas para evitar errores si Supabase no tiene columnas extra
+      // como user_agent, plataforma, actualizado_en, etc.
       const { error } = await supabase
         .from("dispositivos_push")
         .upsert(
           {
             token,
             nombre_dispositivo: dispositivo,
-            user_agent: navigator.userAgent,
-            activo: true,
-            actualizado_en: new Date().toISOString()
+            activo: true
           },
           { onConflict: "token" }
         );
