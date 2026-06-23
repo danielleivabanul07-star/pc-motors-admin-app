@@ -34,7 +34,7 @@ export default function SolicitarCita() {
         },
         body: JSON.stringify({
           titulo: "📅 Nueva cita solicitada",
-          mensaje: `${payload.nombre_cliente} - ${payload.fecha_solicitada || "sin fecha"} ${payload.hora_solicitada || ""}`.trim(),
+          mensaje: `${payload.nombre_cliente} - ${payload.fecha} ${payload.hora}`.trim(),
           url: "/"
         })
       });
@@ -75,22 +75,28 @@ export default function SolicitarCita() {
       nombre_cliente: limpiar(form.nombre_cliente),
       telefono: limpiar(form.telefono),
       email: limpiar(form.email) || null,
+
       anio: limpiar(form.anio) || null,
       marca: limpiar(form.marca) || null,
       modelo: limpiar(form.modelo) || null,
       vin: limpiar(form.vin).toUpperCase() || null,
       placa: limpiar(form.placa).toUpperCase() || null,
+
+      fecha: form.fecha_solicitada,
+      hora: form.hora_solicitada,
+
+      fecha_solicitada: form.fecha_solicitada,
+      hora_solicitada: form.hora_solicitada,
+
+      servicio_solicitado: limpiar(form.motivo),
       motivo: limpiar(form.motivo),
-      fecha_solicitada: form.fecha_solicitada || null,
-      hora_solicitada: form.hora_solicitada || null,
+
       estado: "solicitada",
       notas: limpiar(form.notas) || null,
       creado_por_admin: false
     };
 
-    const { error } = await supabase
-      .from("citas")
-      .insert([payload]);
+    const { error } = await supabase.from("citas").insert([payload]);
 
     setGuardando(false);
 
