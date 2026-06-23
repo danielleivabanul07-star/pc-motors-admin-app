@@ -18,6 +18,7 @@ import logoPC from "./assets/logo-pcmotors.png";
 import PanelMecanico from "./pages/PanelMecanico";
 import Citas from "./pages/Citas";
 import SolicitarCita from "./pages/SolicitarCita";
+import ConfirmarCita from "./pages/ConfirmarCita";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -29,6 +30,9 @@ function App() {
 
   const esFirmaEstimado = path.startsWith("/firma-estimado/");
   const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
+
+  const esConfirmarCita = path.startsWith("/confirmar-cita/");
+  const tokenConfirmarCita = esConfirmarCita ? path.replace("/confirmar-cita/", "") : "";
 
   const esRegistroPublico = path === "/registro-publico";
   const esSolicitudCitaPublica = path === "/solicitar-cita" || path === "/cita" || path === "/citas-publico";
@@ -75,6 +79,10 @@ function App() {
 
   if (esFirmaEstimado) {
     return <FirmaEstimadoCliente token={tokenFirma} />;
+  }
+
+  if (esConfirmarCita) {
+    return <ConfirmarCita token={tokenConfirmarCita} />;
   }
 
   if (esRegistroPublico) {

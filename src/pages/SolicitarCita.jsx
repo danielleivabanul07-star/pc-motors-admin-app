@@ -84,7 +84,8 @@ export default function SolicitarCita() {
       fecha_solicitada: form.fecha_solicitada || null,
       hora_solicitada: form.hora_solicitada || null,
       estado: "solicitada",
-      notas: limpiar(form.notas) || null
+      notas: limpiar(form.notas) || null,
+      creado_por_admin: false
     };
 
     const { error } = await supabase
