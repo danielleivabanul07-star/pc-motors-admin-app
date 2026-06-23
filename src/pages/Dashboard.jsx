@@ -14,7 +14,10 @@ function Dashboard() {
     trabajosMecanicosSemana: [],
     trabajosMecanicosMes: [],
     trabajosPendientesSemana: [],
-    trabajosPendientesMes: []
+    trabajosPendientesMes: [],
+    trabajosPanelMecanicoHoy: 0,
+    trabajosPanelMecanicoSemana: 0,
+    mecanicosPanelMecanicoActivos: 0
   });
 
   const [ocultarTrabajosSemana, setOcultarTrabajosSemana] = useState(false);
@@ -128,6 +131,17 @@ function Dashboard() {
   const resetSemanalActivo = () => {
     const resetDesde = obtenerResetSemanalDesde();
     return Boolean(resetDesde && resetDesde >= inicioSemana());
+  };
+
+  const inicioDia = () => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    return hoy;
+  };
+
+  const esTrabajoDesdePanelMecanico = (trabajo) => {
+    const origen = String(trabajo?.origen || "").toLowerCase();
+    return origen === "panel_mecanico" || origen === "panel mecanico" || origen === "panel-mecanico";
   };
 
   const redondearDinero = (valor) => Math.round(Number(valor || 0) * 100) / 100;
@@ -468,6 +482,10 @@ function Dashboard() {
 
     const trabajosMecanicos = trabajosMecanicosRaw || [];
 
+    const inicioSemanaActual = obtenerInicioSemanaDashboard();
+    const inicioMesActual = obtenerInicioMesDashboard();
+    const semanaReiniciada = resetSemanalActivo();
+
     // Trabajos abiertos: se usan solo para contar clientes/vehículos/trabajos en proceso.
     const trabajosMecanicosActivos = trabajosMecanicos.filter(
       (trabajo) => trabajo.estado !== "finalizado" && !trabajo.hora_fin
@@ -493,10 +511,6 @@ function Dashboard() {
       setRefrescando(false);
       return;
     }
-
-    const inicioSemanaActual = obtenerInicioSemanaDashboard();
-    const inicioMesActual = obtenerInicioMesDashboard();
-    const semanaReiniciada = resetSemanalActivo();
 
     const trabajosSemana = [];
     const trabajosMes = [];
@@ -524,6 +538,25 @@ function Dashboard() {
         const fecha = fechaTrabajoMecanico(trabajo);
         return fecha && fecha >= inicioMesActual;
       }) || [];
+
+    const inicioDiaActual = inicioDia();
+    const trabajosPanelMecanicoHoy = trabajosMecanicos.filter((trabajo) => {
+      if (!esTrabajoDesdePanelMecanico(trabajo)) return false;
+      const fecha = fechaTrabajoMecanico(trabajo);
+      return fecha && fecha >= inicioDiaActual;
+    });
+
+    const trabajosPanelMecanicoSemana = trabajosMecanicos.filter((trabajo) => {
+      if (!esTrabajoDesdePanelMecanico(trabajo)) return false;
+      const fecha = fechaTrabajoMecanico(trabajo);
+      return fecha && fecha >= inicioSemanaActual;
+    });
+
+    const mecanicosPanelMecanicoActivos = new Set(
+      trabajosPanelMecanicoSemana
+        .map((trabajo) => trabajo.mecanico_nombre || trabajo.creado_por || trabajo.mecanico_id)
+        .filter(Boolean)
+    ).size;
 
     const semana = calcularTotalesTrabajosMecanicos(trabajosMecanicosSemana);
     semana.pagosPendientes = calcularPagosPendientes(trabajosPendientesSemana);
@@ -559,7 +592,10 @@ function Dashboard() {
       trabajosMecanicosSemana,
       trabajosMecanicosMes,
       trabajosPendientesSemana,
-      trabajosPendientesMes
+      trabajosPendientesMes,
+      trabajosPanelMecanicoHoy: trabajosPanelMecanicoHoy.length,
+      trabajosPanelMecanicoSemana: trabajosPanelMecanicoSemana.length,
+      mecanicosPanelMecanicoActivos
     });
 
     setOcultarTrabajosSemana(false);
@@ -921,6 +957,9 @@ function Dashboard() {
           <Card title="🚗 Vehículos en proceso" value={stats.vehiculosActivos} />
           <Card title="📁 Clientes atendidos" value={stats.clientesAtendidos} />
           <Card title="🛠 Trabajos activos" value={stats.trabajosActivos} />
+          <Card title="🚗 Ingresados hoy por mecánicos" value={stats.trabajosPanelMecanicoHoy} />
+          <Card title="🔧 Mecánicos activos semana" value={stats.mecanicosPanelMecanicoActivos} />
+          <Card title="📥 Ingresados semana / taller" value={stats.trabajosPanelMecanicoSemana} />
           <Card title="💰 Cobrado esta semana" value={dinero(stats.semana.totalCobrado)} />
           <Card title="⏳ Pendiente semana" value={dinero(stats.semana.pagosPendientes)} />
           <Card title="💰 Cobrado este mes" value={dinero(stats.mes.totalCobrado)} />
@@ -1175,6 +1214,7 @@ const actionsBox = { display: "flex", gap: "12px", flexWrap: "wrap", marginTop: 
 const saveButton = { padding: "12px 16px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const cleanButton = { padding: "12px 16px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const undoButton = { padding: "12px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const monthResetButton = { padding: "12px 16px", background: "#9333ea", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const refreshButton = { padding: "12px 16px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const resetNoticeStyle = { display: "inline-block", marginLeft: "10px", color: "#fca5a5", fontWeight: "bold" };
 const sectionTitle = { color: "#f59e0b", marginTop: "35px", marginBottom: "10px" };

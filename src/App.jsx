@@ -16,6 +16,7 @@ import FirmaEstimadoCliente from "./pages/FirmaEstimadoCliente";
 import Login from "./pages/Login";
 import logoPC from "./assets/logo-pcmotors.png";
 import PanelMecanico from "./pages/PanelMecanico";
+
 function App() {
   const [page, setPage] = useState("dashboard");
   const [session, setSession] = useState(null);
@@ -25,11 +26,10 @@ function App() {
   const path = window.location.pathname;
 
   const esFirmaEstimado = path.startsWith("/firma-estimado/");
-  const tokenFirma = esFirmaEstimado
-    ? path.replace("/firma-estimado/", "")
-    : "";
+  const tokenFirma = esFirmaEstimado ? path.replace("/firma-estimado/", "") : "";
 
   const esRegistroPublico = path === "/registro-publico";
+  const esPanelMecanico = path === "/taller";
 
   useEffect(() => {
     const detectarTamano = () => setEsMovil(window.innerWidth <= 768);
@@ -76,6 +76,10 @@ function App() {
 
   if (esRegistroPublico) {
     return <RegistroCliente />;
+  }
+
+  if (esPanelMecanico) {
+    return <PanelMecanico />;
   }
 
   if (cargandoAuth) {
@@ -160,7 +164,6 @@ function App() {
         {page === "control-trabajos-mecanicos" && <ControlTrabajosMecanicos />}
         {page === "reportes" && <Reportes />}
         {page === "reportes-mecanicos" && <ReportesMecanicos />}
-        {page === "panel-mecanico" && <PanelMecanico />}
       </main>
     </div>
   );

@@ -9,8 +9,13 @@ function Sidebar({ page, setPage }) {
     { id: "registro", label: "📱 Registro Cliente" },
     { id: "archivo", label: "🗄 Archivo Histórico" },
     { id: "mecanicos", label: "🔧 Mecánicos" },
+
+    // PANEL MECÁNICOS
+    { id: "panel-mecanico", label: "🚗 Panel Mecánicos" },
+
     { id: "mano-obra-precios", label: "💵 Mano de Obra" },
-    // NUEVO MÓDULO
+
+    // CONTROL DE TRABAJOS
     { id: "control-trabajos-mecanicos", label: "🛠 Control Trabajos" },
 
     { id: "reportes", label: "📈 Reportes" },

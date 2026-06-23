@@ -1,0 +1,23 @@
+{
+  "name": "PC Motors Admin",
+  "short_name": "PC Motors",
+  "description": "Sistema administrativo PC Motors Auto Repair",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#f59e0b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo-pcmotors.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo-pcmotors.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

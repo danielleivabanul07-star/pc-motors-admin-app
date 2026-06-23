@@ -63,6 +63,7 @@ export default function ControlTrabajosMecanicos() {
   const [resultadoDiagnosticoDraft, setResultadoDiagnosticoDraft] = useState({});
   const [busqueda, setBusqueda] = useState("");
   const [vistaTrabajos, setVistaTrabajos] = useState("activos");
+  const [filtroOrigenTrabajos, setFiltroOrigenTrabajos] = useState("todos");
   const [catalogoManoObra, setCatalogoManoObra] = useState([]);
   const [estimadoEditandoId, setEstimadoEditandoId] = useState(null);
   const [estimadoDraft, setEstimadoDraft] = useState({
@@ -111,6 +112,49 @@ export default function ControlTrabajosMecanicos() {
   const [form, setForm] = useState(formBase);
   const [editForm, setEditForm] = useState(editBase);
 
+  const parsearPiezasSolicitadas = (valor) => {
+    if (Array.isArray(valor)) return valor;
+    if (!valor) return [];
+
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const cantidadPiezasSolicitadas = (trabajo) => {
+    return parsearPiezasSolicitadas(trabajo?.estimado_piezas).filter(
+      (pieza) => String(pieza?.nombre || pieza?.name || "").trim()
+    ).length;
+  };
+
+  const detectarNuevaSolicitudPiezas = (payload) => {
+    const nuevo = payload?.new || {};
+    const anterior = payload?.old || {};
+
+    const cantidadNueva = cantidadPiezasSolicitadas(nuevo);
+    const cantidadAnterior = cantidadPiezasSolicitadas(anterior);
+
+    if (cantidadNueva > cantidadAnterior) {
+      const cliente = nuevo.cliente_nombre || "cliente no registrado";
+      const mecanico = nuevo.mecanico_nombre || nuevo.creado_por || "mecánico";
+      alert(`🔔 Nueva solicitud de piezas\n\n${mecanico} solicitó piezas para ${cliente}.`);
+    }
+
+    cargarDatos();
+  };
+
+  const detectarNuevoCliente = (payload) => {
+    if (payload?.eventType === "INSERT") {
+      const cliente = payload?.new?.nombre || payload?.new?.nombre_cliente || "cliente nuevo";
+      alert(`🔔 Nuevo cliente registrado\n\n${cliente}`);
+    }
+
+    cargarDatos();
+  };
+
   useEffect(() => {
     cargarDatos();
   }, []);
@@ -123,12 +167,12 @@ export default function ControlTrabajosMecanicos() {
   useEffect(() => {
     const channel = supabase
       .channel("control-trabajos-mecanicos-central")
-      .on("postgres_changes", { event: "*", schema: "public", table: "trabajos_mecanicos" }, cargarDatos)
+      .on("postgres_changes", { event: "*", schema: "public", table: "trabajos_mecanicos" }, detectarNuevaSolicitudPiezas)
       .on("postgres_changes", { event: "*", schema: "public", table: "fotos_trabajos_mecanicos" }, cargarDatos)
       .on("postgres_changes", { event: "*", schema: "public", table: "facturas_trabajos" }, cargarDatos)
       .on("postgres_changes", { event: "*", schema: "public", table: "mecanicos" }, cargarDatos)
       .on("postgres_changes", { event: "*", schema: "public", table: "ordenes_trabajo" }, cargarDatos)
-      .on("postgres_changes", { event: "*", schema: "public", table: "clientes" }, cargarDatos)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clientes" }, detectarNuevoCliente)
       .on("postgres_changes", { event: "*", schema: "public", table: "tiempos_mecanicos" }, cargarDatos)
       .on("postgres_changes", { event: "*", schema: "public", table: "mano_obra_precios" }, cargarDatos)
       .subscribe();
@@ -3338,7 +3382,13 @@ export default function ControlTrabajosMecanicos() {
     return true;
   };
 
+  const esTrabajoDesdePanelMecanico = (trabajo) => {
+    const origen = String(trabajo?.origen || "").toLowerCase();
+    return origen === "panel_mecanico" || origen === "panel mecanico" || origen === "panel-mecanico";
+  };
+
   const mostrarOrigenTexto = (trabajo) => {
+    if (esTrabajoDesdePanelMecanico(trabajo)) return "Panel Mecánico";
     if (trabajo.origen === "solicitud" || trabajo.solicitud_id) return "Solicitud Cliente";
     if (trabajo.orden_id) return "Orden de Trabajo";
     return "Trabajo Manual";
@@ -3374,13 +3424,20 @@ export default function ControlTrabajosMecanicos() {
   };
 
   const origenStyle = (trabajo) => {
+    if (esTrabajoDesdePanelMecanico(trabajo)) return originPanelMecanicoBadge;
     if (trabajo.origen === "solicitud" || trabajo.solicitud_id) return originSolicitudBadge;
     return originManualBadge;
   };
 
+  const trabajosPanelMecanicoLista = trabajos.filter(esTrabajoDesdePanelMecanico);
   const trabajosActivosLista = trabajos.filter(esTrabajoActivo);
   const trabajosHistorialLista = trabajos.filter((trabajo) => !esTrabajoActivo(trabajo));
-  const trabajosBaseVista = vistaTrabajos === "historial" ? trabajosHistorialLista : trabajosActivosLista;
+  const trabajosBaseVistaSinFiltroOrigen = vistaTrabajos === "historial" ? trabajosHistorialLista : trabajosActivosLista;
+  const trabajosBaseVista = trabajosBaseVistaSinFiltroOrigen.filter((trabajo) => {
+    if (filtroOrigenTrabajos === "panel_mecanico") return esTrabajoDesdePanelMecanico(trabajo);
+    if (filtroOrigenTrabajos === "sistema") return !esTrabajoDesdePanelMecanico(trabajo);
+    return true;
+  });
 
   const trabajosFiltrados = trabajosBaseVista.filter((trabajo) => {
     const texto = busqueda.trim().toLowerCase();
@@ -3393,13 +3450,73 @@ export default function ControlTrabajosMecanicos() {
       (trabajo.cliente_nombre || "").toLowerCase().includes(texto) ||
       (trabajo.vehiculo || "").toLowerCase().includes(texto) ||
       (trabajo.mecanico_nombre || "").toLowerCase().includes(texto) ||
+      (trabajo.creado_por || "").toLowerCase().includes(texto) ||
+      (trabajo.placa || "").toLowerCase().includes(texto) ||
+      (trabajo.vin || "").toLowerCase().includes(texto) ||
       (trabajo.numero_factura || "").toLowerCase().includes(texto) ||
       (trabajo.trabajo || "").toLowerCase().includes(texto) ||
+      (trabajo.problema || "").toLowerCase().includes(texto) ||
+      (trabajo.descripcion_trabajo || "").toLowerCase().includes(texto) ||
+      (trabajo.notas_mecanico || "").toLowerCase().includes(texto) ||
       (trabajo.resultado_diagnostico || "").toLowerCase().includes(texto) ||
       (trabajo.estado || "").toLowerCase().includes(texto) ||
       mostrarOrigenTexto(trabajo).toLowerCase().includes(texto)
     );
   });
+
+  const piezasSolicitadasMecanicos = trabajos.flatMap((trabajo) => {
+    const piezas = parsearEstimadoPiezas(trabajo.estimado_piezas)
+      .map(normalizarPiezaEstimado)
+      .filter((pieza) => String(pieza.nombre || "").trim());
+
+    return piezas.map((pieza, index) => ({
+      ...pieza,
+      index,
+      trabajo_id: trabajo.id,
+      cliente_nombre: trabajo.cliente_nombre || "Cliente no registrado",
+      vehiculo: trabajo.vehiculo || `${trabajo.anio || ""} ${trabajo.marca || ""} ${trabajo.modelo || ""}`.trim(),
+      mecanico_nombre: trabajo.mecanico_nombre || trabajo.creado_por || "Sin mecánico",
+      estado_pedido: pieza.estado_pedido || pieza.estado || trabajo.solicitud_piezas_estado || "solicitada",
+      trabajo
+    }));
+  });
+
+  const piezasPendientesOrdenar = piezasSolicitadasMecanicos.filter((pieza) =>
+    !["ordenada", "recibida", "cancelada"].includes(String(pieza.estado_pedido || "").toLowerCase())
+  );
+
+  const actualizarEstadoPiezaSolicitada = async (piezaSolicitada, nuevoEstado) => {
+    const trabajo = piezaSolicitada?.trabajo;
+    if (!trabajo?.id) return;
+
+    const piezasActuales = parsearEstimadoPiezas(trabajo.estimado_piezas).map((pieza, index) => {
+      if (index !== piezaSolicitada.index) return pieza;
+
+      return {
+        ...pieza,
+        estado_pedido: nuevoEstado,
+        actualizado_en: new Date().toISOString()
+      };
+    });
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        estimado_piezas: piezasActuales,
+        solicitud_piezas_estado: nuevoEstado
+      })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      return;
+    }
+
+    alert(`Pieza marcada como ${nuevoEstado}.`);
+    await cargarDatos();
+  };
+
 
   return (
     <div style={{ width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
@@ -3419,12 +3536,69 @@ export default function ControlTrabajosMecanicos() {
 
       <div style={summaryGrid}>
         <div style={summaryCard}><strong>🟢 Trabajos activos</strong><span style={summaryNumber}>{resumen.trabajosActivos}</span></div>
+        <div style={summaryCard}><strong>🚗 Creados desde Panel Mecánico</strong><span style={summaryNumber}>{trabajosPanelMecanicoLista.length}</span></div>
         <div style={summaryCard}><strong>💰 Total generado semana</strong><span style={summaryNumber}>{dinero(resumen.totalGeneradoSemana)}</span></div>
         <div style={summaryCard}><strong>📈 Ganancia piezas semana</strong><span style={summaryNumber}>{dinero(resumen.gananciaPiezasSemana)}</span></div>
         <div style={summaryCard}><strong>🔧 Mano de obra semana</strong><span style={summaryNumber}>{dinero(resumen.manoObraSemana)}</span></div>
         <div style={summaryCard}><strong>🗓 Total generado mes</strong><span style={summaryNumber}>{dinero(resumen.totalGeneradoMes)}</span></div>
         <div style={summaryCard}><strong>📈 Ganancia piezas mes</strong><span style={summaryNumber}>{dinero(resumen.gananciaPiezasMes)}</span></div>
       </div>
+
+      <section style={partsRequestBox}>
+        <div style={partsRequestHeader}>
+          <div>
+            <h2 style={sectionTitle}>📦 Piezas solicitadas por mecánicos</h2>
+            <p style={professionalHint}>
+              Aquí aparecen las piezas que los mecánicos agregan desde el Panel Mecánico. Puedes marcarlas como ordenadas o recibidas.
+            </p>
+          </div>
+          <div style={partsCounterBadge}>
+            Pendientes: {piezasPendientesOrdenar.length}
+          </div>
+        </div>
+
+        {piezasSolicitadasMecanicos.length === 0 ? (
+          <div style={emptyStyle}>No hay piezas solicitadas por mecánicos todavía.</div>
+        ) : (
+          <div style={partsRequestList}>
+            {piezasSolicitadasMecanicos.map((pieza) => (
+              <div key={`${pieza.trabajo_id}-${pieza.index}`} style={partsRequestCard}>
+                <div>
+                  <strong style={{ color: "#f59e0b" }}>{pieza.nombre}</strong>
+                  <p style={compactInfo}>Cliente: {pieza.cliente_nombre}</p>
+                  <p style={compactInfo}>Vehículo: {pieza.vehiculo || "No registrado"}</p>
+                  <p style={compactInfo}>Mecánico: {pieza.mecanico_nombre}</p>
+                </div>
+
+                <div>
+                  <p style={compactInfo}>Cantidad: <strong>{pieza.cantidad || 1}</strong></p>
+                  <p style={compactInfo}>Costo: <strong>{dinero(pieza.costo || pieza.costo_real)}</strong></p>
+                  <p style={compactInfo}>Venta: <strong>{dinero(pieza.venta || pieza.precio_venta || pieza.precio_cliente)}</strong></p>
+                  <span style={pieceStatusBadge}>{pieza.estado_pedido || "solicitada"}</span>
+                </div>
+
+                <div style={partsActionColumn}>
+                  <button
+                    type="button"
+                    onClick={() => actualizarEstadoPiezaSolicitada(pieza, "ordenada")}
+                    style={partsButton}
+                  >
+                    🚚 Ordenada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => actualizarEstadoPiezaSolicitada(pieza, "recibida")}
+                    style={paidButtonActive}
+                  >
+                    ✅ Recibida
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
 
       <details style={formBox}>
         <summary style={formSummary}>➕ Nuevo Trabajo Manual</summary>
@@ -3454,7 +3628,8 @@ export default function ControlTrabajosMecanicos() {
               Solo se guardarán los pagos, total pagado, saldo pendiente, estado del pago y notas. No se modifican factura, piezas, mano de obra, tiempos, mecánico ni comisiones.
             </div>
           )}
-          <p><strong>Origen:</strong> {mostrarOrigenTexto(trabajoEditando)}</p>
+          <p><strong>Origen:</strong> <span style={origenStyle(trabajoEditando)}>{mostrarOrigenTexto(trabajoEditando)}</span></p>
+          {trabajoEditando.creado_por && <p><strong>Creado por:</strong> {trabajoEditando.creado_por}</p>}
           <p><strong>Mecánico:</strong> {trabajoEditando.mecanico_nombre}</p>
 
           <input placeholder="Cliente" value={editForm.cliente_nombre} onChange={(e) => setEditForm({ ...editForm, cliente_nombre: e.target.value })} style={inputStyle} />
@@ -3603,6 +3778,27 @@ export default function ControlTrabajosMecanicos() {
         </button>
       </div>
 
+      <div style={viewToggleBox}>
+        <button
+          onClick={() => setFiltroOrigenTrabajos("todos")}
+          style={filtroOrigenTrabajos === "todos" ? viewButtonActive : viewButton}
+        >
+          📋 Todos
+        </button>
+        <button
+          onClick={() => setFiltroOrigenTrabajos("panel_mecanico")}
+          style={filtroOrigenTrabajos === "panel_mecanico" ? viewButtonActive : viewButton}
+        >
+          🚗 Solo Panel Mecánico ({trabajosPanelMecanicoLista.length})
+        </button>
+        <button
+          onClick={() => setFiltroOrigenTrabajos("sistema")}
+          style={filtroOrigenTrabajos === "sistema" ? viewButtonActive : viewButton}
+        >
+          🧾 Solo Sistema/Admin
+        </button>
+      </div>
+
       <input
         type="text"
         placeholder={vistaTrabajos === "historial" ? "Buscar en historial por cliente, vehículo, mecánico, orden, factura o diagnóstico..." : "Buscar por cliente, vehículo, mecánico, orden, factura, diagnóstico, resultado o estado..."}
@@ -3625,7 +3821,11 @@ export default function ControlTrabajosMecanicos() {
                 <div>
                   <h2 style={{ color: "#f59e0b", margin: "0 0 6px 0" }}>{trabajo.cliente_nombre || "Cliente no registrado"}</h2>
                   <p style={compactMeta}>{trabajo.vehiculo || "Vehículo no registrado"}</p>
-                  <p style={compactMeta}>Mecánico: {trabajo.mecanico_nombre || "Sin mecánico"}</p>
+                  <p style={compactMeta}>Mecánico: {trabajo.mecanico_nombre || trabajo.creado_por || "Sin mecánico"}</p>
+                  <div style={cardBadgesRow}>
+                    <span style={origenStyle(trabajo)}>{mostrarOrigenTexto(trabajo)}</span>
+                    {trabajo.creado_por && <span style={createdByBadge}>Creado por: {trabajo.creado_por}</span>}
+                  </div>
                 </div>
 
                 <div style={jobStatusBox}>
@@ -3666,6 +3866,9 @@ export default function ControlTrabajosMecanicos() {
                 <h2 style={{ color: "#f59e0b", marginTop: "14px" }}>{trabajo.mecanico_nombre}</h2>
 
               <p><strong>Origen:</strong> <span style={origenStyle(trabajo)}>{mostrarOrigenTexto(trabajo)}</span></p>
+              {trabajo.creado_por && <p><strong>Creado por:</strong> {trabajo.creado_por}</p>}
+              {trabajo.placa && <p><strong>Placa:</strong> {trabajo.placa}</p>}
+              {trabajo.vin && <p><strong>VIN:</strong> {trabajo.vin}</p>}
               {trabajo.solicitud_id && <p><strong>📥 Solicitud:</strong> #{trabajo.solicitud_id}</p>}
               {trabajo.orden_id && <p><strong>📋 Orden:</strong> #{trabajo.orden_id}</p>}
               {trabajo.cliente_id && <p><strong>👤 Cliente ID:</strong> #{trabajo.cliente_id}</p>}
@@ -3673,7 +3876,13 @@ export default function ControlTrabajosMecanicos() {
 
               <p><strong>Cliente:</strong> {trabajo.cliente_nombre || "No registrado"}</p>
               <p><strong>Vehículo:</strong> {trabajo.vehiculo || "No registrado"}</p>
-              <p><strong>Diagnóstico / Trabajo:</strong><br />{trabajo.trabajo}</p>
+              <p><strong>Diagnóstico / Trabajo:</strong><br />{trabajo.trabajo || trabajo.problema || trabajo.descripcion_trabajo || "Sin descripción"}</p>
+              {(trabajo.problema || trabajo.descripcion_trabajo) && (
+                <p><strong>🧾 Problema reportado:</strong><br />{trabajo.problema || trabajo.descripcion_trabajo}</p>
+              )}
+              {trabajo.notas_mecanico && (
+                <p><strong>🛠 Notas del mecánico:</strong><br />{trabajo.notas_mecanico}</p>
+              )}
 
               <p><strong>📋 Resultado diagnóstico:</strong><br />{trabajo.resultado_diagnostico || "Pendiente"}</p>
 
@@ -4144,6 +4353,9 @@ const activeBadge = { background: "#16a34a", color: "white", padding: "4px 8px",
 const finishedBadge = { background: "#6b7280", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
 const originSolicitudBadge = { background: "#7c3aed", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
 const originManualBadge = { background: "#0f766e", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
+const originPanelMecanicoBadge = { background: "#ea580c", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
+const createdByBadge = { background: "#1d4ed8", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
+const cardBadgesRow = { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" };
 const invoiceButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#f59e0b", color: "#111827", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const smsButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#0ea5e9", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const reviewButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
@@ -4424,6 +4636,69 @@ const detailsSummary = {
   color: "#f59e0b",
   fontWeight: "bold",
   marginBottom: "8px"
+};
+
+
+const partsRequestBox = {
+  background: "rgba(15, 23, 42, 0.95)",
+  border: "1px solid #f59e0b",
+  borderRadius: "14px",
+  padding: "16px",
+  marginTop: "22px",
+  marginBottom: "22px"
+};
+
+const partsRequestHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "14px",
+  alignItems: "center",
+  flexWrap: "wrap"
+};
+
+const partsCounterBadge = {
+  background: "#7f1d1d",
+  color: "white",
+  padding: "10px 14px",
+  borderRadius: "999px",
+  fontWeight: "bold"
+};
+
+const partsRequestList = {
+  display: "grid",
+  gap: "12px",
+  marginTop: "12px"
+};
+
+const partsRequestCard = {
+  display: "grid",
+  gridTemplateColumns: "1.4fr 1fr auto",
+  gap: "14px",
+  background: "#111827",
+  border: "1px solid #374151",
+  borderRadius: "12px",
+  padding: "14px",
+  alignItems: "center"
+};
+
+const partsActionColumn = {
+  display: "grid",
+  gap: "8px"
+};
+
+const compactInfo = {
+  color: "#d1d5db",
+  margin: "4px 0"
+};
+
+const pieceStatusBadge = {
+  display: "inline-block",
+  marginTop: "6px",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  background: "#374151",
+  color: "white",
+  fontWeight: "bold"
 };
 
 
