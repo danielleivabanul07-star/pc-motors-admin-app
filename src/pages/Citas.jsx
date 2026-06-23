@@ -129,6 +129,9 @@ export default function Citas() {
       vin: limpiar(form.vin).toUpperCase() || null,
       placa: limpiar(form.placa).toUpperCase() || null,
       motivo: limpiar(form.motivo) || "Cita creada por PC Motors",
+      servicio_solicitado: limpiar(form.motivo) || "Cita creada por PC Motors",
+      fecha: form.fecha_solicitada,
+      hora: form.hora_solicitada,
       fecha_solicitada: form.fecha_solicitada,
       hora_solicitada: form.hora_solicitada,
       estado: "pendiente_confirmacion",
@@ -201,7 +204,7 @@ export default function Citas() {
     }
   };
 
-  const abrirWhatsApp = (cita) => {
+  const abrirMensaje = (cita) => {
     if (!cita?.token_confirmacion) {
       alert("Esta cita no tiene link de confirmación.");
       return;
@@ -209,15 +212,16 @@ export default function Citas() {
 
     const telefono = String(cita.telefono || "").replace(/\D/g, "");
     const link = construirLinkConfirmacion(cita);
+
     const mensaje = encodeURIComponent(
-      `Hola ${cita.nombre_cliente || ""}, PC Motors necesita que confirmes tu cita aquí:\n${link}`
+      `Hola ${cita.nombre_cliente || ""}, PC Motors necesita que confirmes tu cita aquí: ${link}`
     );
 
     const url = telefono
-      ? `https://wa.me/1${telefono}?text=${mensaje}`
-      : `https://wa.me/?text=${mensaje}`;
+      ? `sms:${telefono}?&body=${mensaje}`
+      : `sms:?&body=${mensaje}`;
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.location.href = url;
   };
 
   const formatearFecha = (fecha) => {
@@ -364,8 +368,8 @@ export default function Citas() {
                   🔗 Copiar link
                 </button>
 
-                <button onClick={() => abrirWhatsApp(cita)} style={whatsappButton}>
-                  🟢 Enviar WhatsApp
+                <button onClick={() => abrirMensaje(cita)} style={smsButton}>
+                  📩 Enviar mensaje
                 </button>
 
                 <button onClick={() => actualizarCita(cita.id, { estado: "completada" })} style={doneButton}>
@@ -422,7 +426,7 @@ const confirmButton = { padding: "10px 12px", background: "#16a34a", color: "whi
 const doneButton = { padding: "10px 12px", background: "#9333ea", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const deleteButton = { padding: "10px 12px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const copyButton = { padding: "10px 12px", background: "#0ea5e9", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
-const whatsappButton = { padding: "10px 12px", background: "#22c55e", color: "#052e16", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const smsButton = { padding: "10px 12px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const cancelButton = { padding: "10px 12px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const formBox = { background: "rgba(31,41,55,0.95)", border: "1px solid #f59e0b", borderRadius: "12px", padding: "16px", marginBottom: "18px" };
 const sectionTitle = { color: "#f59e0b", marginTop: 0 };
