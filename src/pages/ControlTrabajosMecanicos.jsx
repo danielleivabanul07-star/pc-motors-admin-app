@@ -531,14 +531,16 @@ export default function ControlTrabajosMecanicos() {
       )
     );
 
-    const precioCliente = Number(
-      pieza.venta ??
-      pieza.precio_venta ??
+    const precioManual = Number(
       pieza.precio_cliente ??
+      pieza.precio_venta ??
+      pieza.venta ??
       pieza.precio ??
-      precioSugerido ??
       0
     );
+
+    const usarPrecioManual = Boolean(pieza.precio_cliente_manual) && precioManual > 0;
+    const precioCliente = usarPrecioManual ? redondearDinero(precioManual) : precioSugerido;
 
     return {
       id: pieza.id || `${Date.now()}-${index}`,
@@ -681,21 +683,19 @@ export default function ControlTrabajosMecanicos() {
       })
     ].filter((linea) => Number(linea.base || 0) > 0);
 
-    const totalBase = lineasBase.reduce((total, linea) => total + Number(linea.base || 0), 0);
-    const totalCliente = Number(totales.totalGenerado || 0);
+    const lineasCliente = lineasBase.map((linea) => {
+      const base = Number(linea.base || 0);
 
-    let acumulado = 0;
-    const lineasCliente = lineasBase.map((linea, index) => {
-      const esUltima = index === lineasBase.length - 1;
-      const total = esUltima
-        ? redondearDinero(totalCliente - acumulado)
-        : redondearDinero(totalCliente * (Number(linea.base || 0) / totalBase));
-
-      acumulado = redondearDinero(acumulado + total);
+      if (linea.tipo === "pieza") {
+        return {
+          ...linea,
+          total: redondearDinero(base * 1.06)
+        };
+      }
 
       return {
         ...linea,
-        total
+        total: redondearDinero(base)
       };
     });
 
