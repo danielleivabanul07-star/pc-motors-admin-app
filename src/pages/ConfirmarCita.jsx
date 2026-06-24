@@ -44,6 +44,7 @@ export default function ConfirmarCita({ token }) {
     const [h, m] = String(hora).split(":");
     const fecha = new Date();
     fecha.setHours(Number(h || 0), Number(m || 0), 0, 0);
+
     return fecha.toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
@@ -53,26 +54,54 @@ export default function ConfirmarCita({ token }) {
 
   const enviarPushConfirmacion = async (citaConfirmada) => {
     try {
-      await fetch("/api/enviar-push", {
+      const fechaCita =
+        citaConfirmada.fecha ||
+        citaConfirmada.fecha_solicitada ||
+        "";
+
+      const horaCita =
+        citaConfirmada.hora ||
+        citaConfirmada.hora_solicitada ||
+        "";
+
+      const mensaje = `${citaConfirmada.nombre_cliente || "Cliente"} confirmó su cita para ${formatearFecha(
+        fechaCita
+      )} ${formatearHora(horaCita)}`;
+
+      const respuesta = await fetch("/api/enviar-push", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
           titulo: "✅ Cita confirmada",
-          mensaje: `${citaConfirmada.nombre_cliente} confirmó su cita para ${formatearFecha(
-            citaConfirmada.fecha_solicitada
-          )} ${formatearHora(citaConfirmada.hora_solicitada)}`,
-          url: "/"
+          mensaje,
+          url: "/admin"
         })
       });
+
+      const resultado = await respuesta.json().catch(() => null);
+
+      console.log("Resultado push cita confirmada:", {
+        okHttp: respuesta.ok,
+        status: respuesta.status,
+        resultado
+      });
+
+      return respuesta.ok;
     } catch (error) {
-      console.log("Error enviando push:", error);
+      console.log("Error enviando push de cita confirmada:", error);
+      return false;
     }
   };
 
   const confirmarCita = async () => {
     if (!cita?.id) return;
+
+    if (cita.estado === "confirmada") {
+      alert("Esta cita ya fue confirmada.");
+      return;
+    }
 
     setConfirmando(true);
 
@@ -87,10 +116,9 @@ export default function ConfirmarCita({ token }) {
       .eq("id", cita.id)
       .eq("token_confirmacion", token);
 
-    setConfirmando(false);
-
     if (error) {
       console.log(error);
+      setConfirmando(false);
       alert("No se pudo confirmar la cita.");
       return;
     }
@@ -100,6 +128,7 @@ export default function ConfirmarCita({ token }) {
 
     await enviarPushConfirmacion(citaActualizada);
 
+    setConfirmando(false);
     alert("Cita confirmada correctamente.");
   };
 
@@ -137,14 +166,14 @@ export default function ConfirmarCita({ token }) {
         <div style={infoBox}>
           <p><strong>Cliente:</strong><br />{cita.nombre_cliente}</p>
           <p><strong>Teléfono:</strong><br />{cita.telefono}</p>
-          <p><strong>Fecha:</strong><br />{formatearFecha(cita.fecha_solicitada)}</p>
-          <p><strong>Hora:</strong><br />{formatearHora(cita.hora_solicitada)}</p>
+          <p><strong>Fecha:</strong><br />{formatearFecha(cita.fecha || cita.fecha_solicitada)}</p>
+          <p><strong>Hora:</strong><br />{formatearHora(cita.hora || cita.hora_solicitada)}</p>
           <p>
             <strong>Vehículo:</strong><br />
             {`${cita.anio || ""} ${cita.marca || ""} ${cita.modelo || ""}`.trim() ||
               "No registrado"}
           </p>
-          <p><strong>Motivo:</strong><br />{cita.motivo || "Cita de servicio"}</p>
+          <p><strong>Motivo:</strong><br />{cita.motivo || cita.servicio_solicitado || "Cita de servicio"}</p>
         </div>
 
         {!yaConfirmada && (

@@ -21,6 +21,7 @@ import SolicitarCita from "./pages/SolicitarCita";
 import ConfirmarCita from "./pages/ConfirmarCita";
 import InicioAcceso from "./pages/InicioAcceso";
 import EstadoCliente from "./pages/EstadoCliente";
+import EstadoTrabajo from "./pages/EstadoTrabajo";
 
 function App() {
   const [page, setPage] = useState("dashboard");
@@ -38,6 +39,9 @@ function App() {
 
   const esConfirmarCita = path.startsWith("/confirmar-cita/");
   const tokenConfirmarCita = esConfirmarCita ? path.replace("/confirmar-cita/", "") : "";
+
+  const esEstadoTrabajo = path.startsWith("/estado-trabajo/");
+  const tokenEstadoTrabajo = esEstadoTrabajo ? path.replace("/estado-trabajo/", "") : "";
 
   const esRegistroPublico = path === "/registro-publico";
   const esSolicitudCitaPublica =
@@ -96,6 +100,10 @@ function App() {
 
   if (esConfirmarCita) {
     return <ConfirmarCita token={tokenConfirmarCita} />;
+  }
+
+  if (esEstadoTrabajo) {
+    return <EstadoTrabajo token={tokenEstadoTrabajo} />;
   }
 
   if (esRegistroPublico) {

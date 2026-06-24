@@ -195,32 +195,87 @@ export default function Solicitudes() {
       .filter(Boolean)
       .join(" ");
 
-    const { error: errorTrabajoMecanico } = await supabase
+    const trabajoMecanicoCompleto = {
+      mecanico_id: mecanico.id,
+      mecanico_nombre: mecanico.nombre,
+      cliente_nombre: solicitud.nombre_cliente || null,
+      cliente_telefono: solicitud.telefono || null,
+      telefono_cliente: solicitud.telefono || null,
+      vehiculo: vehiculoTexto || null,
+      anio: solicitud.anio || null,
+      marca: solicitud.marca || null,
+      modelo: solicitud.modelo || null,
+      color: solicitud.color || null,
+      placa: solicitud.placa || null,
+      vin: solicitud.vin || null,
+      millaje: solicitud.millaje || null,
+      problema: solicitud.problema || "Diagnóstico inicial",
+      trabajo: solicitud.problema || "Diagnóstico inicial",
+      descripcion_trabajo: solicitud.problema || "Diagnóstico inicial",
+      estado: "diagnostico",
+      fase_actual: "diagnostico",
+      hora_inicio: inicioTrabajo,
+      diagnostico_inicio: inicioTrabajo,
+      diagnostico_minutos: 0,
+      reparacion_minutos: 0,
+      costo_piezas: 0,
+      venta_piezas: 0,
+      mano_obra: 0,
+      notas: `Creado automáticamente desde solicitud #${solicitud.id} / orden #${ordenCreada.id}`,
+      origen: "solicitud",
+      cliente_id: clienteCreado.id,
+      vehiculo_id: vehiculoCreado.id,
+      orden_id: ordenCreada.id,
+      solicitud_id: solicitud.id
+    };
+
+    let trabajoCreado = null;
+
+    let { data: trabajoData, error: errorTrabajoMecanico } = await supabase
       .from("trabajos_mecanicos")
-      .insert([
-        {
-          mecanico_id: mecanico.id,
-          mecanico_nombre: mecanico.nombre,
-          cliente_nombre: solicitud.nombre_cliente || null,
-          vehiculo: vehiculoTexto || null,
-          trabajo: solicitud.problema || "Diagnóstico inicial",
-          estado: "diagnostico",
-          fase_actual: "diagnostico",
-          hora_inicio: inicioTrabajo,
-          diagnostico_inicio: inicioTrabajo,
-          diagnostico_minutos: 0,
-          reparacion_minutos: 0,
-          costo_piezas: 0,
-          venta_piezas: 0,
-          mano_obra: 0,
-          notas: `Creado automáticamente desde solicitud #${solicitud.id} / orden #${ordenCreada.id}`,
-          origen: "solicitud",
-          cliente_id: clienteCreado.id,
-          vehiculo_id: vehiculoCreado.id,
-          orden_id: ordenCreada.id,
-          solicitud_id: solicitud.id
-        }
-      ]);
+      .insert([trabajoMecanicoCompleto])
+      .select()
+      .single();
+
+    if (errorTrabajoMecanico) {
+      const mensajeError = `${errorTrabajoMecanico.message || ""} ${errorTrabajoMecanico.details || ""}`.toLowerCase();
+
+      if (
+        mensajeError.includes("cliente_telefono") ||
+        mensajeError.includes("telefono_cliente") ||
+        mensajeError.includes("problema") ||
+        mensajeError.includes("descripcion_trabajo") ||
+        mensajeError.includes("anio") ||
+        mensajeError.includes("marca") ||
+        mensajeError.includes("modelo") ||
+        mensajeError.includes("color") ||
+        mensajeError.includes("placa") ||
+        mensajeError.includes("vin") ||
+        mensajeError.includes("millaje")
+      ) {
+        const trabajoBasico = { ...trabajoMecanicoCompleto };
+        delete trabajoBasico.cliente_telefono;
+        delete trabajoBasico.telefono_cliente;
+        delete trabajoBasico.problema;
+        delete trabajoBasico.descripcion_trabajo;
+        delete trabajoBasico.anio;
+        delete trabajoBasico.marca;
+        delete trabajoBasico.modelo;
+        delete trabajoBasico.color;
+        delete trabajoBasico.placa;
+        delete trabajoBasico.vin;
+        delete trabajoBasico.millaje;
+
+        const segundoIntento = await supabase
+          .from("trabajos_mecanicos")
+          .insert([trabajoBasico])
+          .select()
+          .single();
+
+        trabajoData = segundoIntento.data;
+        errorTrabajoMecanico = segundoIntento.error;
+      }
+    }
 
     if (errorTrabajoMecanico) {
       console.log("Error creando trabajo mecánico:", errorTrabajoMecanico);
@@ -229,11 +284,17 @@ export default function Solicitudes() {
       return;
     }
 
+    trabajoCreado = trabajoData;
+
     const { error: errorActualizar } = await supabase
       .from("solicitudes_clientes")
       .update({
         estado: "aceptada",
-        aceptada_en: new Date().toISOString()
+        aceptada_en: new Date().toISOString(),
+        cliente_id: clienteCreado.id,
+        vehiculo_id: vehiculoCreado.id,
+        orden_id: ordenCreada.id,
+        trabajo_id: trabajoCreado?.id || null
       })
       .eq("id", solicitud.id);
 

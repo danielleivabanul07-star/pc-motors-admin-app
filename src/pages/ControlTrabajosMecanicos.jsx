@@ -401,12 +401,57 @@ export default function ControlTrabajosMecanicos() {
   const GOOGLE_REVIEW_URL = "https://g.page/r/CZDnoTatR0yOEAI/review";
   const APP_PUBLIC_URL = "https://pc-motors-admin-app.vercel.app";
 
+  const enviarPushGlobal = async ({ titulo, mensaje, url = "/admin" }) => {
+    try {
+      await fetch("/api/enviar-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo, mensaje, url })
+      });
+    } catch (error) {
+      console.log("No se pudo enviar push global:", error);
+    }
+  };
+
   const obtenerBasePublicaApp = () => {
     const origenActual = window.location.origin;
     if (origenActual.includes("localhost") || origenActual.includes("127.0.0.1")) {
       return APP_PUBLIC_URL;
     }
     return origenActual;
+  };
+
+  const construirLinkEstadoTrabajo = (trabajo) => {
+    if (!trabajo?.id) return "";
+    return `${obtenerBasePublicaApp()}/estado-trabajo/${trabajo.id}`;
+  };
+
+  const obtenerTelefonoEstadoTrabajo = (trabajo) => {
+    return String(
+      trabajo?.telefono_cliente ||
+      trabajo?.cliente_telefono ||
+      trabajo?.telefono ||
+      ""
+    ).replace(/\D/g, "");
+  };
+
+  const enviarLinkEstadoCliente = (trabajo) => {
+    if (!trabajo?.id) {
+      alert("Este trabajo no tiene ID válido para crear el link.");
+      return;
+    }
+
+    const telefono = obtenerTelefonoEstadoTrabajo(trabajo);
+    const link = construirLinkEstadoTrabajo(trabajo);
+    const mensaje = encodeURIComponent(
+      `Hola ${trabajo.cliente_nombre || "cliente"}, PC Motors te comparte el link para revisar el estado de tu vehículo: ${link}`
+    );
+
+    const url = telefono
+      ? `sms:${telefono}?&body=${mensaje}`
+      : `sms:?&body=${mensaje}`;
+
+    window.location.href = url;
   };
 
   const dinero = (valor) => `$${Number(valor || 0).toFixed(2)}`;
@@ -2931,7 +2976,46 @@ export default function ControlTrabajosMecanicos() {
     await cargarDatos();
   };
 
+  const marcarEsperandoPiezas = async (trabajo) => {
+    const confirmar = confirm(
+      `¿Marcar este trabajo como ESPERANDO PIEZAS?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}`
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("trabajos_mecanicos")
+      .update({
+        estimado_estado: trabajo.estimado_estado || "estimado_aprobado",
+        estado: "esperando_piezas",
+        fase_actual: "esperando_piezas",
+        esperando_piezas_en: new Date().toISOString()
+      })
+      .eq("id", trabajo.id);
+
+    if (error) {
+      console.log(error);
+      alert(JSON.stringify(error, null, 2));
+      return;
+    }
+
+    await enviarPushGlobal({
+      titulo: "📦 Esperando piezas",
+      mensaje: `${trabajo.cliente_nombre || "Cliente"} quedó en espera de piezas.`,
+      url: "/admin"
+    });
+
+    alert("Trabajo marcado como esperando piezas. Se actualiza en admin, mecánico y cliente.");
+    await cargarDatos();
+  };
+
   const marcarPiezasOrdenadas = async (trabajo) => {
+    const confirmar = confirm(
+      `¿Marcar piezas como ORDENADAS?\n\nCliente: ${trabajo.cliente_nombre || "No registrado"}`
+    );
+
+    if (!confirmar) return;
+
     const { error } = await supabase
       .from("trabajos_mecanicos")
       .update({
@@ -2948,6 +3032,13 @@ export default function ControlTrabajosMecanicos() {
       return;
     }
 
+    await enviarPushGlobal({
+      titulo: "🚚 Piezas ordenadas",
+      mensaje: `Las piezas de ${trabajo.cliente_nombre || "cliente"} ya fueron ordenadas.`,
+      url: "/taller"
+    });
+
+    alert("Piezas marcadas como ordenadas. Ya no queda como pendiente de ordenar y se actualiza en ambos paneles.");
     await cargarDatos();
   };
 
@@ -4177,11 +4268,22 @@ export default function ControlTrabajosMecanicos() {
                     <button onClick={() => crearEditarEstimado(trabajo)} style={estimateButton}>📋 Abrir Editor de Estimado</button>
                     <button onClick={() => crearPDFEstimado(trabajo, true)} style={invoiceButton}>📄 Generar PDF Estimado</button>
                     <button onClick={() => enviarEstimadoSMS(trabajo)} style={smsButton}>📱 Enviar Estimado para Firma</button>
+                    <button onClick={() => enviarLinkEstadoCliente(trabajo)} style={smsStatusButton}>📩 Enviar link de estatus</button>
                     <button onClick={() => copiarLinkFirmaEstimado(trabajo)} style={invoiceButton}>🔗 Copiar Link de Firma</button>
                     <button onClick={() => aprobarEstimado(trabajo)} style={reviewButton}>✅ Aprobar Estimado</button>
                     <button onClick={() => rechazarEstimado(trabajo)} style={deleteButton}>❌ Rechazar Estimado</button>
-                    <button onClick={() => marcarPiezasOrdenadas(trabajo)} style={partsButton}>🚚 Piezas Ordenadas</button>
-                    <button onClick={() => marcarPiezasRecibidas(trabajo)} style={partsReceivedButton}>📦 Piezas Recibidas</button>
+
+                    {trabajo.estado !== "esperando_piezas" && trabajo.estado !== "piezas_ordenadas" && trabajo.estado !== "piezas_recibidas" && (
+                      <button onClick={() => marcarEsperandoPiezas(trabajo)} style={waitingPartsButton}>📦 Marcar esperando piezas</button>
+                    )}
+
+                    {trabajo.estado !== "piezas_ordenadas" && trabajo.estado !== "piezas_recibidas" && (
+                      <button onClick={() => marcarPiezasOrdenadas(trabajo)} style={partsButton}>🚚 Piezas Ordenadas</button>
+                    )}
+
+                    {trabajo.estado !== "piezas_recibidas" && (
+                      <button onClick={() => marcarPiezasRecibidas(trabajo)} style={partsReceivedButton}>📦 Piezas Recibidas</button>
+                    )}
                   </>
                 )}
 
@@ -4357,6 +4459,7 @@ const originPanelMecanicoBadge = { background: "#ea580c", color: "white", paddin
 const createdByBadge = { background: "#1d4ed8", color: "white", padding: "4px 8px", borderRadius: "6px", fontWeight: "bold" };
 const cardBadgesRow = { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" };
 const invoiceButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#f59e0b", color: "#111827", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const smsStatusButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const smsButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#0ea5e9", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const reviewButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#16a34a", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const smsReviewButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#7c3aed", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
@@ -4414,6 +4517,7 @@ const diagnosisTextarea = {
 
 const estimateBox = { background: "#020617", padding: "14px", borderRadius: "10px", border: "1px solid #f59e0b", marginTop: "14px", marginBottom: "12px" };
 const estimateButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#9333ea", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
+const waitingPartsButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const partsButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#d97706", color: "#111827", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const partsReceivedButton = { width: "100%", padding: "12px", marginTop: "10px", background: "#059669", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const estimateEditorBox = {

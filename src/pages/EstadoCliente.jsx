@@ -52,7 +52,7 @@ export default function EstadoCliente() {
     const valor = limpiar(busqueda);
 
     if (!valor) {
-      setError("Escribe tu teléfono, placa o VIN.");
+      setError("Escribe tu nombre, teléfono, placa o VIN.");
       return;
     }
 
@@ -62,6 +62,8 @@ export default function EstadoCliente() {
     setCargando(true);
 
     const filtros = [
+      `cliente_nombre.ilike.%${valor}%`,
+      `nombre_cliente.ilike.%${valor}%`,
       `telefono_cliente.ilike.%${valor}%`,
       `cliente_telefono.ilike.%${valor}%`,
       `placa.ilike.%${valorMayuscula}%`,
@@ -89,7 +91,7 @@ export default function EstadoCliente() {
     }
 
     if (!data || data.length === 0) {
-      setError("No encontramos un vehículo con esos datos. Revisa el teléfono, placa o VIN.");
+      setError("No encontramos un vehículo con esos datos. Revisa el nombre, teléfono, placa o VIN.");
       return;
     }
 
@@ -144,12 +146,12 @@ export default function EstadoCliente() {
 
         <h1 style={titleStyle}>Estado de mi vehículo</h1>
         <p style={subtitleStyle}>
-          Escribe tu teléfono, placa o VIN para ver en qué etapa está tu carro.
+          Escribe tu nombre, teléfono, placa o VIN para ver en qué etapa está tu carro.
         </p>
 
         <form onSubmit={buscarTrabajo} style={formStyle}>
           <input
-            placeholder="Teléfono, placa o VIN"
+            placeholder="Nombre, teléfono, placa o VIN"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             style={inputStyle}

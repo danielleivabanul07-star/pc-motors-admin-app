@@ -211,6 +211,44 @@ function PanelMecanico() {
     }
   };
 
+  const obtenerBasePublicaApp = () => {
+    const origenActual = window.location.origin;
+    if (origenActual.includes("localhost") || origenActual.includes("127.0.0.1")) {
+      return "https://pc-motors-admin-app.vercel.app";
+    }
+    return origenActual;
+  };
+
+  const construirLinkEstadoTrabajo = (trabajo) => {
+    if (!trabajo?.id) return "";
+    return `${obtenerBasePublicaApp()}/estado-trabajo/${trabajo.id}`;
+  };
+
+  const enviarLinkEstadoCliente = (trabajo) => {
+    if (!trabajo?.id) {
+      alert("Este trabajo no tiene ID válido para crear el link.");
+      return;
+    }
+
+    const telefono = String(
+      trabajo.telefono_cliente ||
+      trabajo.cliente_telefono ||
+      editForm.telefono_cliente ||
+      ""
+    ).replace(/\D/g, "");
+
+    const link = construirLinkEstadoTrabajo(trabajo);
+    const mensaje = encodeURIComponent(
+      `Hola ${trabajo.cliente_nombre || editForm.cliente_nombre || "cliente"}, PC Motors te comparte el link para revisar el estado de tu vehículo: ${link}`
+    );
+
+    const url = telefono
+      ? `sms:${telefono}?&body=${mensaje}`
+      : `sms:?&body=${mensaje}`;
+
+    window.location.href = url;
+  };
+
   const parsearJsonArray = (valor) => {
     if (Array.isArray(valor)) return valor;
     if (!valor) return [];
@@ -334,6 +372,7 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
   const crearTrabajo = async () => {
     const cliente = limpiarTexto(form.cliente_nombre);
+    const telefonoCliente = limpiarTexto(form.telefono_cliente);
     const mecanico = limpiarTexto(form.mecanico_nombre);
     const problema = limpiarTexto(form.problema);
 
@@ -353,20 +392,108 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
     }
 
     const confirmar = confirm(
-      `¿Crear trabajo para este vehículo?\n\nCliente: ${cliente}\nVehículo: ${form.anio} ${form.marca} ${form.modelo}\nMecánico: ${mecanico}`
+      `¿Crear cliente, vehículo, orden y trabajo para este vehículo?\n\nCliente: ${cliente}\nVehículo: ${form.anio} ${form.marca} ${form.modelo}\nMecánico: ${mecanico}`
     );
 
     if (!confirmar) return;
 
     setGuardando(true);
 
-    const vehiculoTexto = `${form.anio || ""} ${form.marca || ""} ${form.modelo || ""}`.trim();
+    const vehiculoTexto = `${form.anio || ""} ${form.marca || ""} ${form.modelo || ""}`.trim() || "Vehículo sin datos";
     const ahora = new Date().toISOString();
+
+    let clienteCreado = null;
+    let vehiculoCreado = null;
+    let ordenCreada = null;
+
+    const limpiarCreacionParcial = async () => {
+      if (ordenCreada?.id) await supabase.from("ordenes_trabajo").delete().eq("id", ordenCreada.id);
+      if (vehiculoCreado?.id) await supabase.from("vehiculos").delete().eq("id", vehiculoCreado.id);
+      if (clienteCreado?.id) await supabase.from("clientes").delete().eq("id", clienteCreado.id);
+    };
+
+    const { data: clienteData, error: errorCliente } = await supabase
+      .from("clientes")
+      .insert([
+        {
+          nombre: cliente,
+          telefono: telefonoCliente || null,
+          estado: "activo",
+          archivado: false,
+          notas: `Creado desde Panel Mecánico por ${mecanico}.`
+        }
+      ])
+      .select()
+      .single();
+
+    if (errorCliente) {
+      console.log("Error creando cliente desde panel mecánico:", errorCliente);
+      alert(JSON.stringify(errorCliente, null, 2));
+      setGuardando(false);
+      return;
+    }
+
+    clienteCreado = clienteData;
+
+    const vehiculoPayload = {
+      cliente_id: clienteCreado.id,
+      anio: limpiarTexto(form.anio) || null,
+      marca: limpiarTexto(form.marca) || null,
+      modelo: limpiarTexto(form.modelo) || null,
+      color: limpiarTexto(form.color) || null,
+      placa: limpiarTexto(form.placa).toUpperCase() || null,
+      vin: limpiarTexto(form.vin).toUpperCase() || null,
+      millaje: limpiarTexto(form.millaje) || null,
+      notas: `${vehiculoTexto}${limpiarTexto(form.motor) ? ` / Motor: ${limpiarTexto(form.motor)}` : ""}${limpiarTexto(form.trim) ? ` / Trim: ${limpiarTexto(form.trim)}` : ""}`
+    };
+
+    const { data: vehiculoData, error: errorVehiculo } = await supabase
+      .from("vehiculos")
+      .insert([vehiculoPayload])
+      .select()
+      .single();
+
+    if (errorVehiculo) {
+      console.log("Error creando vehículo desde panel mecánico:", errorVehiculo);
+      await limpiarCreacionParcial();
+      alert(JSON.stringify(errorVehiculo, null, 2));
+      setGuardando(false);
+      return;
+    }
+
+    vehiculoCreado = vehiculoData;
+
+    const { data: ordenData, error: errorOrden } = await supabase
+      .from("ordenes_trabajo")
+      .insert([
+        {
+          cliente_id: clienteCreado.id,
+          vehiculo_id: vehiculoCreado.id,
+          diagnostico: problema,
+          mecanico,
+          estado: "Diagnosticando",
+          prioridad: "normal",
+          notas: `Orden creada desde Panel Mecánico por ${mecanico}.`
+        }
+      ])
+      .select()
+      .single();
+
+    if (errorOrden) {
+      console.log("Error creando orden desde panel mecánico:", errorOrden);
+      await limpiarCreacionParcial();
+      alert(JSON.stringify(errorOrden, null, 2));
+      setGuardando(false);
+      return;
+    }
+
+    ordenCreada = ordenData;
 
     const nuevoTrabajo = {
       mecanico_id: form.mecanico_id,
       cliente_nombre: cliente,
-      telefono_cliente: limpiarTexto(form.telefono_cliente),
+      cliente_telefono: telefonoCliente || null,
+      telefono_cliente: telefonoCliente || null,
       mecanico_nombre: mecanico,
       vehiculo: vehiculoTexto,
       anio: limpiarTexto(form.anio),
@@ -383,7 +510,7 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       trabajo: problema,
       descripcion_trabajo: problema,
       notas_mecanico: limpiarTexto(form.notas_mecanico),
-      notas: limpiarTexto(form.notas_mecanico),
+      notas: limpiarTexto(form.notas_mecanico) || `Trabajo creado desde Panel Mecánico por ${mecanico}.`,
       estado: "diagnostico",
       fase_actual: "diagnostico",
       origen: "panel_mecanico",
@@ -396,17 +523,72 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       venta_piezas: 0,
       mano_obra: 0,
       estimado_mano_obra: 0,
-      estimado_piezas: []
+      estimado_piezas: [],
+      cliente_id: clienteCreado.id,
+      vehiculo_id: vehiculoCreado.id,
+      orden_id: ordenCreada.id,
+      solicitud_id: null
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("trabajos_mecanicos")
       .insert([nuevoTrabajo])
       .select()
       .single();
 
     if (error) {
+      const mensajeError = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+
+      if (
+        mensajeError.includes("cliente_telefono") ||
+        mensajeError.includes("telefono_cliente") ||
+        mensajeError.includes("problema") ||
+        mensajeError.includes("descripcion_trabajo") ||
+        mensajeError.includes("anio") ||
+        mensajeError.includes("marca") ||
+        mensajeError.includes("modelo") ||
+        mensajeError.includes("motor") ||
+        mensajeError.includes("trim") ||
+        mensajeError.includes("tipo_vehiculo") ||
+        mensajeError.includes("color") ||
+        mensajeError.includes("placa") ||
+        mensajeError.includes("vin") ||
+        mensajeError.includes("millaje") ||
+        mensajeError.includes("estimado_mano_obra") ||
+        mensajeError.includes("estimado_piezas")
+      ) {
+        const trabajoBasico = { ...nuevoTrabajo };
+        delete trabajoBasico.cliente_telefono;
+        delete trabajoBasico.telefono_cliente;
+        delete trabajoBasico.problema;
+        delete trabajoBasico.descripcion_trabajo;
+        delete trabajoBasico.anio;
+        delete trabajoBasico.marca;
+        delete trabajoBasico.modelo;
+        delete trabajoBasico.motor;
+        delete trabajoBasico.trim;
+        delete trabajoBasico.tipo_vehiculo;
+        delete trabajoBasico.color;
+        delete trabajoBasico.placa;
+        delete trabajoBasico.vin;
+        delete trabajoBasico.millaje;
+        delete trabajoBasico.estimado_mano_obra;
+        delete trabajoBasico.estimado_piezas;
+
+        const segundoIntento = await supabase
+          .from("trabajos_mecanicos")
+          .insert([trabajoBasico])
+          .select()
+          .single();
+
+        data = segundoIntento.data;
+        error = segundoIntento.error;
+      }
+    }
+
+    if (error) {
       console.log(error);
+      await limpiarCreacionParcial();
       alert(JSON.stringify(error, null, 2));
       setGuardando(false);
       return;
@@ -415,10 +597,14 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
     await enviarPush({
       titulo: "🚘 Vehículo registrado por mecánico",
       mensaje: `${vehiculoTexto || "Vehículo"} - ${cliente} / Mecánico: ${mecanico}`,
-      url: "/"
+      url: "/admin"
     });
 
-    alert("Trabajo creado correctamente. Ahora aparece en tus trabajos activos y en el sistema principal.");
+    alert(
+      "Trabajo creado correctamente.\n\n" +
+      `Cliente #${clienteCreado.id}\nVehículo #${vehiculoCreado.id}\nOrden #${ordenCreada.id}\nTrabajo #${data?.id || ""}\n\n` +
+      "Ahora aparece en tus trabajos activos, Clientes Activos y Control Trabajos."
+    );
 
     setForm({
       mecanico_nombre: form.mecanico_nombre,
@@ -866,6 +1052,9 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
             <button onClick={guardarTrabajoActivo} style={primaryButton} disabled={guardandoTrabajo}>
               {guardandoTrabajo ? "Guardando..." : "💾 Guardar cambios del trabajo"}
             </button>
+            <button onClick={() => enviarLinkEstadoCliente(trabajoSeleccionado)} style={smsStatusButton}>
+              📩 Enviar link de estatus al cliente
+            </button>
             <button onClick={() => setTrabajoSeleccionado(null)} style={cancelButton}>Cerrar editor</button>
           </div>
         </div>
@@ -967,6 +1156,7 @@ const labelStyleFull = { display: "grid", gap: "6px", color: "white", fontWeight
 const inputStyle = { width: "100%", padding: "12px", borderRadius: "9px", border: "1px solid #374151", background: "#111827", color: "white", fontSize: "15px" };
 const textareaStyle = { ...inputStyle, minHeight: "95px", resize: "vertical" };
 const primaryButton = { padding: "13px 16px", background: "#16a34a", color: "white", border: "none", borderRadius: "9px", cursor: "pointer", fontWeight: "bold", marginTop: "16px" };
+const smsStatusButton = { padding: "12px 16px", background: "#0ea5e9", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const cancelButton = { padding: "13px 16px", background: "#6b7280", color: "white", border: "none", borderRadius: "9px", cursor: "pointer", fontWeight: "bold", marginTop: "16px" };
 const blueButton = { padding: "13px 16px", background: "#2563eb", color: "white", border: "none", borderRadius: "9px", cursor: "pointer", fontWeight: "bold" };
 const editButton = { padding: "10px 12px", background: "#2563eb", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
