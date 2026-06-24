@@ -63,7 +63,6 @@ export default function EstadoCliente() {
 
     const filtros = [
       `cliente_nombre.ilike.%${valor}%`,
-      `nombre_cliente.ilike.%${valor}%`,
       `telefono_cliente.ilike.%${valor}%`,
       `cliente_telefono.ilike.%${valor}%`,
       `placa.ilike.%${valorMayuscula}%`,
