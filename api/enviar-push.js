@@ -6,40 +6,42 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "{}");
 
 if (!getApps().length) {
   initializeApp({
-    credential: cert(serviceAccount)
+    credential: cert({
+      ...serviceAccount,
+      private_key: serviceAccount.private_key?.replace(/\\n/g, "\n")
+    })
   });
 }
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 );
 
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Método no permitido. Usa POST." });
+      return res.status(405).json({ ok: false, error: "Método no permitido. Usa POST." });
     }
 
-    const { titulo, mensaje, url = "/" } = req.body || {};
+    const { titulo, mensaje, url = "/admin" } = req.body || {};
 
     const { data: dispositivos, error } = await supabase
       .from("dispositivos_push")
-      .select("token")
+      .select("token, activo")
       .eq("activo", true);
 
     if (error) {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    const tokens = [
-      ...new Set((dispositivos || []).map((d) => d.token).filter(Boolean))
-    ];
+    const tokens = [...new Set((dispositivos || []).map((d) => d.token).filter(Boolean))];
 
     if (tokens.length === 0) {
-      return res.status(400).json({
+      return res.status(200).json({
         ok: false,
-        error: "No hay dispositivos activos."
+        error: "No hay dispositivos activos registrados.",
+        total_tokens: 0
       });
     }
 
@@ -50,20 +52,39 @@ export default async function handler(req, res) {
         body: mensaje || "Nueva notificación"
       },
       data: {
-        url: String(url || "/")
+        url: String(url || "/admin")
+      },
+      webpush: {
+        fcmOptions: {
+          link: String(url || "/admin")
+        },
+        notification: {
+          icon: "/logo-pcmotors.png",
+          badge: "/logo-pcmotors.png"
+        }
       }
     });
 
+    const errores = [];
     const tokensInvalidos = [];
 
     response.responses.forEach((resultado, index) => {
-      const codigo = resultado.error?.code || "";
+      if (!resultado.success) {
+        const codigo = resultado.error?.code || "error-desconocido";
+        const message = resultado.error?.message || "";
 
-      if (
-        codigo.includes("registration-token-not-registered") ||
-        codigo.includes("invalid-registration-token")
-      ) {
-        tokensInvalidos.push(tokens[index]);
+        errores.push({
+          token: tokens[index]?.slice(0, 18) + "...",
+          code: codigo,
+          message
+        });
+
+        if (
+          codigo.includes("registration-token-not-registered") ||
+          codigo.includes("invalid-registration-token")
+        ) {
+          tokensInvalidos.push(tokens[index]);
+        }
       }
     });
 
@@ -75,10 +96,12 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      ok: true,
+      ok: response.successCount > 0,
+      total_tokens: tokens.length,
       enviados: response.successCount,
       fallidos: response.failureCount,
-      tokens_invalidos_desactivados: tokensInvalidos.length
+      tokens_invalidos_desactivados: tokensInvalidos.length,
+      errores
     });
   } catch (error) {
     console.error("ERROR ENVIAR PUSH:", error);
