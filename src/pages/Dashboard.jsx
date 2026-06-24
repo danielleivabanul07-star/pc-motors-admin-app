@@ -325,6 +325,27 @@ function Dashboard() {
     guardarNotificacionesLeidas((notificaciones || []).map((notificacion) => notificacion.id));
   };
 
+  const limpiarNotificacionesLeidas = () => {
+    const confirmar = confirm(
+      "¿Limpiar el historial de notificaciones leídas?\n\nEsto volverá a mostrar las notificaciones recientes que todavía existan en el Dashboard."
+    );
+
+    if (!confirmar) return;
+
+    localStorage.removeItem("pc_motors_notificaciones_leidas");
+    setNotificacionesLeidas([]);
+  };
+
+  const limpiarTodasNotificacionesVisibles = () => {
+    const confirmar = confirm(
+      "¿Ocultar todas las notificaciones visibles?\n\nEsto no borra clientes, piezas ni trabajos. Solo marca las notificaciones actuales como leídas."
+    );
+
+    if (!confirmar) return;
+
+    marcarTodasNotificacionesLeidas();
+  };
+
   const construirNotificacionesDashboard = (solicitudes = [], trabajosMecanicos = []) => {
     const lista = [];
 
@@ -1315,9 +1336,14 @@ function Dashboard() {
             </span>
           </div>
           <div style={notificationActionsBox}>
-            <button onClick={marcarTodasNotificacionesLeidas} style={markAllButton}>
+            <button onClick={limpiarTodasNotificacionesVisibles} style={markAllButton}>
               ✅ Marcar todo como leído
             </button>
+
+            <button onClick={limpiarNotificacionesLeidas} style={clearNotificationsButton}>
+              🧹 Reset historial
+            </button>
+
             <button
               onClick={activarSonidoPermisosPush}
               style={notifySmallButton}
@@ -1327,11 +1353,11 @@ function Dashboard() {
           </div>
         </div>
 
-        {notificaciones.length === 0 ? (
-          <div style={emptyStyle}>No hay notificaciones recientes.</div>
+        {notificacionesPendientes.length === 0 ? (
+          <div style={emptyStyle}>No hay notificaciones pendientes.</div>
         ) : (
           <div style={notificationListBox}>
-            {notificaciones.map((notificacion) => {
+            {notificacionesPendientes.map((notificacion) => {
               const leida = notificacionesLeidas.includes(notificacion.id);
 
               return (
@@ -1800,6 +1826,7 @@ const markAllButton = {
   fontWeight: "bold"
 };
 
+const clearNotificationsButton = { padding: "8px 12px", background: "#dc2626", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "bold" };
 const notifySmallButton = {
   padding: "10px 12px",
   background: "#2563eb",
