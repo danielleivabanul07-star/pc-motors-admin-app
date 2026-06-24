@@ -60,6 +60,8 @@ export default function FirmaEstimadoCliente({ token }) {
       pieza.venta ??
       pieza.precio_venta ??
       pieza.precio_cliente ??
+      pieza.precio_promedio ??
+      pieza.precio_sugerido ??
       pieza.precio ??
       0
     )
@@ -127,21 +129,19 @@ export default function FirmaEstimadoCliente({ token }) {
       })
     ].filter((linea) => Number(linea.base || 0) > 0);
 
-    const totalBase = lineasBase.reduce((total, linea) => total + Number(linea.base || 0), 0);
-    const totalCliente = Number(totalesBase.totalGenerado || 0);
+    const lineasCliente = lineasBase.map((linea) => {
+      const base = Number(linea.base || 0);
 
-    let acumulado = 0;
-    const lineasCliente = lineasBase.map((linea, index) => {
-      const esUltima = index === lineasBase.length - 1;
-      const total = esUltima
-        ? redondearDinero(totalCliente - acumulado)
-        : redondearDinero(totalCliente * (Number(linea.base || 0) / totalBase));
-
-      acumulado = redondearDinero(acumulado + total);
+      if (linea.tipo === "pieza") {
+        return {
+          ...linea,
+          total: redondearDinero(base * 1.06)
+        };
+      }
 
       return {
         ...linea,
-        total
+        total: redondearDinero(base)
       };
     });
 
