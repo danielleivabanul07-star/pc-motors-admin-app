@@ -130,7 +130,7 @@ export default function ControlTrabajosMecanicos() {
     ).length;
   };
 
-  const detectarNuevaSolicitudPiezas = (payload) => {
+  const detectarNuevaSolicitudPiezas = async (payload) => {
     const nuevo = payload?.new || {};
     const anterior = payload?.old || {};
 
@@ -140,7 +140,19 @@ export default function ControlTrabajosMecanicos() {
     if (cantidadNueva > cantidadAnterior) {
       const cliente = nuevo.cliente_nombre || "cliente no registrado";
       const mecanico = nuevo.mecanico_nombre || nuevo.creado_por || "mecánico";
+      const piezasNuevas = parsearPiezasSolicitadas(nuevo.estimado_piezas)
+        .slice(cantidadAnterior)
+        .map((pieza) => `${pieza.nombre || pieza.name || "Pieza"} x${pieza.cantidad || 1}`)
+        .join(", ");
+
       alert(`🔔 Nueva solicitud de piezas\n\n${mecanico} solicitó piezas para ${cliente}.`);
+
+      await enviarPushGlobal({
+        titulo: "🔧 Nueva solicitud de piezas",
+        mensaje: `${mecanico} pidió: ${piezasNuevas || "piezas"} / ${cliente}`,
+        url: "/admin",
+        tipo: "piezas"
+      });
     }
 
     cargarDatos();
@@ -401,8 +413,26 @@ export default function ControlTrabajosMecanicos() {
   const GOOGLE_REVIEW_URL = "https://g.page/r/CZDnoTatR0yOEAI/review";
   const APP_PUBLIC_URL = "https://pc-motors-admin-app.vercel.app";
 
-  const enviarPushGlobal = async ({ titulo, mensaje, url = "/admin" }) => {
+  const crearNotificacionDashboard = async ({ titulo, mensaje, url = "/admin", tipo = "piezas" }) => {
     try {
+      await supabase.from("notificaciones").insert([
+        {
+          titulo,
+          mensaje,
+          tipo,
+          url,
+          leida: false,
+          creado_en: new Date().toISOString()
+        }
+      ]);
+    } catch (error) {
+      console.log("No se pudo guardar notificación en dashboard:", error);
+    }
+  };
+
+  const enviarPushGlobal = async ({ titulo, mensaje, url = "/admin", tipo = "sistema" }) => {
+    try {
+      await crearNotificacionDashboard({ titulo, mensaje, url, tipo });
       await fetch("/api/enviar-push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -554,7 +584,14 @@ export default function ControlTrabajosMecanicos() {
       venta: precioCliente,
       precio_venta: precioCliente,
       precio_cliente: precioCliente,
-      precio_cliente_manual: Boolean(pieza.precio_cliente_manual)
+      precio_cliente_manual: Boolean(pieza.precio_cliente_manual),
+      nota: String(pieza.nota || pieza.notas || "").trim(),
+      solicitado_por: pieza.solicitado_por || pieza.mecanico_nombre || "",
+      solicitado_por_id: pieza.solicitado_por_id || pieza.mecanico_id || null,
+      solicitado_en: pieza.solicitado_en || null,
+      estado_pedido: pieza.estado_pedido || pieza.estado || "solicitada",
+      actualizado_en: pieza.actualizado_en || null,
+      visible_mecanico: pieza.visible_mecanico !== false
     };
   };
 
@@ -3619,6 +3656,13 @@ export default function ControlTrabajosMecanicos() {
       alert(JSON.stringify(error, null, 2));
       return;
     }
+
+    await enviarPushGlobal({
+      titulo: nuevoEstado === "ordenada" ? "🚚 Pieza ordenada" : "📦 Pieza recibida",
+      mensaje: `${piezaSolicitada.nombre} para ${piezaSolicitada.cliente_nombre} fue marcada como ${nuevoEstado}.`,
+      url: "/taller",
+      tipo: "piezas"
+    });
 
     alert(`Pieza marcada como ${nuevoEstado}.`);
     await cargarDatos();

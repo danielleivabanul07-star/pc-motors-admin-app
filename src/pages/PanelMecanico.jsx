@@ -51,6 +51,7 @@ function PanelMecanico() {
   const [usuario, setUsuario] = useState("");
   const [password, setPassword] = useState("");
   const [buscandoVin, setBuscandoVin] = useState(false);
+  const [escaneandoVin, setEscaneandoVin] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [piezaBuscar, setPiezaBuscar] = useState("");
   const [piezaBuscarTrabajo, setPiezaBuscarTrabajo] = useState("");
@@ -108,8 +109,7 @@ function PanelMecanico() {
   const [piezaDraft, setPiezaDraft] = useState({
     nombre: "",
     cantidad: "1",
-    costo: "",
-    venta: ""
+    nota: ""
   });
 
   useEffect(() => {
@@ -120,6 +120,23 @@ function PanelMecanico() {
     if (autorizado && form.mecanico_id) {
       cargarTrabajosMecanico(form.mecanico_id, form.mecanico_nombre);
     }
+  }, [autorizado, form.mecanico_id, form.mecanico_nombre]);
+
+  useEffect(() => {
+    if (!autorizado || (!form.mecanico_id && !form.mecanico_nombre)) return;
+
+    const channel = supabase
+      .channel(`panel-mecanico-trabajos-${form.mecanico_id || form.mecanico_nombre}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "trabajos_mecanicos" },
+        () => cargarTrabajosMecanico(form.mecanico_id, form.mecanico_nombre)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [autorizado, form.mecanico_id, form.mecanico_nombre]);
 
   const cargarMecanicos = async () => {
@@ -211,6 +228,28 @@ function PanelMecanico() {
     }
   };
 
+  const crearNotificacionAdmin = async ({ titulo, mensaje, url = "/admin", tipo = "piezas" }) => {
+    try {
+      await supabase.from("notificaciones").insert([
+        {
+          titulo,
+          mensaje,
+          tipo,
+          url,
+          leida: false,
+          creado_en: new Date().toISOString()
+        }
+      ]);
+    } catch (error) {
+      console.log("No se pudo guardar notificación en dashboard:", error);
+    }
+  };
+
+  const notificarAdmin = async ({ titulo, mensaje, url = "/admin", tipo = "piezas" }) => {
+    await crearNotificacionAdmin({ titulo, mensaje, url, tipo });
+    await enviarPush({ titulo, mensaje, url });
+  };
+
   const obtenerBasePublicaApp = () => {
     const origenActual = window.location.origin;
     if (origenActual.includes("localhost") || origenActual.includes("127.0.0.1")) {
@@ -264,12 +303,21 @@ function PanelMecanico() {
     id: pieza.id || `${Date.now()}-pieza-${index}`,
     nombre: String(pieza.nombre || pieza.name || "").trim(),
     cantidad: Number(pieza.cantidad || pieza.qty || 1),
+    nota: String(pieza.nota || pieza.notas || "").trim(),
+    solicitado_por: pieza.solicitado_por || pieza.mecanico_nombre || form.mecanico_nombre || "",
+    solicitado_por_id: pieza.solicitado_por_id || pieza.mecanico_id || form.mecanico_id || null,
+    solicitado_en: pieza.solicitado_en || new Date().toISOString(),
+    estado_pedido: pieza.estado_pedido || pieza.estado || "solicitada",
+    actualizado_en: pieza.actualizado_en || null,
+
+    // El mecánico no captura ni ve precios. Estos campos se conservan para que el admin pueda completarlos.
     costo: Number(pieza.costo ?? pieza.costo_real ?? 0),
     costo_real: Number(pieza.costo_real ?? pieza.costo ?? 0),
     venta: Number(pieza.venta ?? pieza.precio_venta ?? pieza.precio_cliente ?? 0),
     precio_venta: Number(pieza.precio_venta ?? pieza.venta ?? pieza.precio_cliente ?? 0),
     precio_cliente: Number(pieza.precio_cliente ?? pieza.venta ?? pieza.precio_venta ?? 0),
-    precio_normal: Number(pieza.precio_normal ?? pieza.precio_regular ?? 0)
+    precio_normal: Number(pieza.precio_normal ?? pieza.precio_regular ?? 0),
+    visible_mecanico: true
   });
 
   const calcularTotalPiezasCosto = (piezas) =>
@@ -279,10 +327,37 @@ function PanelMecanico() {
     (piezas || []).reduce((total, pieza) => total + Number(pieza.venta || pieza.precio_venta || pieza.precio_cliente || 0) * Number(pieza.cantidad || 1), 0);
 
   const buscarVin = async () => {
-    const vin = limpiarTexto(form.vin).toUpperCase();
+    await buscarVinPorValor(form.vin, "form");
+  };
+
+  const buscarVinEdit = async () => {
+    await buscarVinPorValor(editForm.vin, "edit");
+  };
+
+  const aplicarDatosVin = (vin, data, destino = "form") => {
+    const actualizador = destino === "edit" ? setEditForm : setForm;
+
+    actualizador((prev) => ({
+      ...prev,
+      vin,
+      anio: data?.ModelYear || prev.anio,
+      marca: data?.Make || prev.marca,
+      modelo: data?.Model || prev.modelo,
+      motor:
+        data?.EngineModel ||
+        data?.EngineConfiguration ||
+        data?.DisplacementL ||
+        prev.motor,
+      trim: data?.Trim || data?.Series || prev.trim,
+      tipo_vehiculo: data?.VehicleType || prev.tipo_vehiculo
+    }));
+  };
+
+  const buscarVinPorValor = async (vinValor, destino = "form") => {
+    const vin = limpiarTexto(vinValor).toUpperCase();
 
     if (vin.length < 11) {
-      alert("Escribe un VIN válido. Lo ideal son 17 caracteres.");
+      alert("No se detectó un VIN válido. Si la cámara no lo lee, escríbelo manualmente.");
       return;
     }
 
@@ -300,21 +375,7 @@ function PanelMecanico() {
         return;
       }
 
-      setForm((prev) => ({
-        ...prev,
-        vin,
-        anio: data.ModelYear || prev.anio,
-        marca: data.Make || prev.marca,
-        modelo: data.Model || prev.modelo,
-        motor:
-          data.EngineModel ||
-          data.EngineConfiguration ||
-          data.DisplacementL ||
-          prev.motor,
-        trim: data.Trim || data.Series || prev.trim,
-        tipo_vehiculo: data.VehicleType || prev.tipo_vehiculo
-      }));
-
+      aplicarDatosVin(vin, data, destino);
       alert("Datos del vehículo completados por VIN.");
     } catch (error) {
       console.log(error);
@@ -322,6 +383,39 @@ function PanelMecanico() {
     }
 
     setBuscandoVin(false);
+  };
+
+  const escanearVinDesdeImagen = async (archivo, destino = "form") => {
+    if (!archivo) return;
+
+    if (!("BarcodeDetector" in window)) {
+      alert("Este navegador no permite escanear VIN automáticamente. Toma la foto y escribe el VIN manualmente.");
+      return;
+    }
+
+    setEscaneandoVin(true);
+
+    try {
+      const formatos = ["code_39", "code_128", "qr_code", "data_matrix"];
+      const detector = new window.BarcodeDetector({ formats: formatos });
+      const bitmap = await createImageBitmap(archivo);
+      const codigos = await detector.detect(bitmap);
+      const textoDetectado = String(codigos?.[0]?.rawValue || "").toUpperCase();
+      const vin = (textoDetectado.match(/[A-HJ-NPR-Z0-9]{17}/) || [textoDetectado])[0];
+
+      if (!vin || vin.length < 11) {
+        alert("No pude leer el VIN de la imagen. Intenta con mejor luz o escríbelo manualmente.");
+        setEscaneandoVin(false);
+        return;
+      }
+
+      await buscarVinPorValor(vin, destino);
+    } catch (error) {
+      console.log("Error escaneando VIN:", error);
+      alert("No se pudo escanear el VIN. Escríbelo manualmente o intenta otra foto.");
+    }
+
+    setEscaneandoVin(false);
   };
 
   const buscarPiezaEnTienda = (vehiculo, pieza) => {
@@ -594,10 +688,11 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       return;
     }
 
-    await enviarPush({
+    await notificarAdmin({
       titulo: "🚘 Vehículo registrado por mecánico",
       mensaje: `${vehiculoTexto || "Vehículo"} - ${cliente} / Mecánico: ${mecanico}`,
-      url: "/admin"
+      url: "/admin",
+      tipo: "trabajo"
     });
 
     alert(
@@ -672,11 +767,18 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       id: `${Date.now()}-pieza-panel`,
       nombre,
       cantidad: Number(piezaDraft.cantidad || 1),
-      costo: Number(piezaDraft.costo || 0),
-      costo_real: Number(piezaDraft.costo || 0),
-      venta: Number(piezaDraft.venta || 0),
-      precio_venta: Number(piezaDraft.venta || 0),
-      precio_cliente: Number(piezaDraft.venta || 0)
+      nota: limpiarTexto(piezaDraft.nota),
+      estado_pedido: "solicitada",
+      solicitado_por: form.mecanico_nombre,
+      solicitado_por_id: form.mecanico_id,
+      solicitado_en: new Date().toISOString(),
+      costo: 0,
+      costo_real: 0,
+      venta: 0,
+      precio_venta: 0,
+      precio_cliente: 0,
+      precio_normal: 0,
+      visible_mecanico: true
     });
 
     setEditForm((prev) => {
@@ -689,15 +791,17 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       };
     });
 
-    setPiezaDraft({ nombre: "", cantidad: "1", costo: "", venta: "" });
+    setPiezaDraft({ nombre: "", cantidad: "1", nota: "" });
   };
 
   const actualizarPieza = (index, campo, valor) => {
     setEditForm((prev) => {
       const piezas = [...(prev.estimado_piezas || [])];
+      const piezaActual = piezas[index] || {};
+
       piezas[index] = normalizarPieza({
-        ...(piezas[index] || {}),
-        [campo]: campo === "nombre" ? valor : Number(valor || 0)
+        ...piezaActual,
+        [campo]: campo === "cantidad" ? Number(valor || 1) : valor
       }, index);
 
       return {
@@ -723,6 +827,55 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
     });
   };
 
+  const valorNoVacio = (nuevo, anterior = "") => {
+    const texto = limpiarTexto(nuevo);
+    return texto || anterior || "";
+  };
+
+  const sincronizarRelacionesTrabajo = async (trabajoBase, datos) => {
+    try {
+      if (trabajoBase?.cliente_id) {
+        await supabase
+          .from("clientes")
+          .update({
+            nombre: datos.cliente_nombre || trabajoBase.cliente_nombre || null,
+            telefono: datos.telefono_cliente || trabajoBase.telefono_cliente || trabajoBase.cliente_telefono || null,
+            estado: "activo"
+          })
+          .eq("id", trabajoBase.cliente_id);
+      }
+
+      if (trabajoBase?.vehiculo_id) {
+        await supabase
+          .from("vehiculos")
+          .update({
+            anio: datos.anio || null,
+            marca: datos.marca || null,
+            modelo: datos.modelo || null,
+            color: datos.color || null,
+            placa: datos.placa || null,
+            vin: datos.vin || null,
+            millaje: datos.millaje || null,
+            notas: `${datos.vehiculo || ""}${datos.motor ? ` / Motor: ${datos.motor}` : ""}${datos.trim ? ` / Trim: ${datos.trim}` : ""}`.trim() || null
+          })
+          .eq("id", trabajoBase.vehiculo_id);
+      }
+
+      if (trabajoBase?.orden_id) {
+        await supabase
+          .from("ordenes_trabajo")
+          .update({
+            diagnostico: datos.problema || datos.trabajo || null,
+            estado: datos.estado || "Diagnosticando",
+            notas: datos.notas_mecanico || datos.notas || null
+          })
+          .eq("id", trabajoBase.orden_id);
+      }
+    } catch (error) {
+      console.log("No se pudieron sincronizar cliente/vehículo/orden:", error);
+    }
+  };
+
   const guardarTrabajoActivo = async () => {
     if (!trabajoSeleccionado?.id) return;
 
@@ -734,25 +887,28 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
     setGuardandoTrabajo(true);
 
-    const vehiculoTexto = limpiarTexto(editForm.vehiculo) || `${editForm.anio || ""} ${editForm.marca || ""} ${editForm.modelo || ""}`.trim();
+    const anioFinal = valorNoVacio(editForm.anio, trabajoSeleccionado.anio);
+    const marcaFinal = valorNoVacio(editForm.marca, trabajoSeleccionado.marca);
+    const modeloFinal = valorNoVacio(editForm.modelo, trabajoSeleccionado.modelo);
+    const vehiculoTexto = limpiarTexto(editForm.vehiculo) || limpiarTexto(trabajoSeleccionado.vehiculo) || `${anioFinal || ""} ${marcaFinal || ""} ${modeloFinal || ""}`.trim();
     const piezas = (editForm.estimado_piezas || []).map(normalizarPieza).filter((pieza) => pieza.nombre);
-    const costoPiezas = Number(editForm.costo_piezas || calcularTotalPiezasCosto(piezas) || 0);
-    const ventaPiezas = Number(editForm.venta_piezas || calcularTotalPiezasVenta(piezas) || 0);
-    const manoObra = Number(editForm.mano_obra || editForm.estimado_mano_obra || 0);
+    const costoPiezas = calcularTotalPiezasCosto(piezas);
+    const ventaPiezas = calcularTotalPiezasVenta(piezas);
+    const manoObra = Number(trabajoSeleccionado.mano_obra || trabajoSeleccionado.estimado_mano_obra || 0);
 
     const updateData = {
-      cliente_nombre: limpiarTexto(editForm.cliente_nombre) || null,
-      telefono_cliente: limpiarTexto(editForm.telefono_cliente) || null,
+      cliente_nombre: valorNoVacio(editForm.cliente_nombre, trabajoSeleccionado.cliente_nombre) || null,
+      telefono_cliente: valorNoVacio(editForm.telefono_cliente, trabajoSeleccionado.telefono_cliente || trabajoSeleccionado.cliente_telefono) || null,
       vehiculo: vehiculoTexto || null,
-      anio: limpiarTexto(editForm.anio),
-      marca: limpiarTexto(editForm.marca),
-      modelo: limpiarTexto(editForm.modelo),
-      motor: limpiarTexto(editForm.motor),
-      trim: limpiarTexto(editForm.trim),
-      color: limpiarTexto(editForm.color),
-      placa: limpiarTexto(editForm.placa).toUpperCase(),
-      vin: limpiarTexto(editForm.vin).toUpperCase(),
-      millaje: limpiarTexto(editForm.millaje),
+      anio: anioFinal,
+      marca: marcaFinal,
+      modelo: modeloFinal,
+      motor: valorNoVacio(editForm.motor, trabajoSeleccionado.motor),
+      trim: valorNoVacio(editForm.trim, trabajoSeleccionado.trim),
+      color: valorNoVacio(editForm.color, trabajoSeleccionado.color),
+      placa: valorNoVacio(editForm.placa, trabajoSeleccionado.placa).toUpperCase(),
+      vin: valorNoVacio(editForm.vin, trabajoSeleccionado.vin).toUpperCase(),
+      millaje: valorNoVacio(editForm.millaje, trabajoSeleccionado.millaje),
       problema,
       trabajo: problema,
       descripcion_trabajo: problema,
@@ -762,11 +918,12 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       estado: editForm.estado || "diagnostico",
       fase_actual: editForm.estado || "diagnostico",
       estimado_piezas: piezas,
-      estimado_mano_obra: manoObra,
+      estimado_mano_obra: trabajoSeleccionado.estimado_mano_obra || manoObra,
       costo_piezas: costoPiezas,
       venta_piezas: ventaPiezas,
-      mano_obra: manoObra,
-      estimado_estado: piezas.length > 0 || manoObra > 0 ? "estimado_pendiente" : (trabajoSeleccionado.estimado_estado || "sin_estimado")
+      mano_obra: trabajoSeleccionado.mano_obra || manoObra,
+      estimado_estado: piezas.length > 0 ? (trabajoSeleccionado.estimado_estado || "sin_estimado") : (trabajoSeleccionado.estimado_estado || "sin_estimado"),
+      solicitud_piezas_estado: piezas.some((pieza) => String(pieza.estado_pedido || "").toLowerCase() === "solicitada") ? "solicitada" : trabajoSeleccionado.solicitud_piezas_estado
     };
 
     let { error } = await supabase
@@ -796,6 +953,8 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       return;
     }
 
+    await sincronizarRelacionesTrabajo(trabajoSeleccionado, updateData);
+
     const piezasAnteriores = parsearJsonArray(trabajoSeleccionado.estimado_piezas)
       .map(normalizarPieza)
       .filter((pieza) => pieza.nombre);
@@ -815,10 +974,11 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
         .map((pieza) => `${pieza.nombre} x${pieza.cantidad || 1}`)
         .join(", ");
 
-      await enviarPush({
+      await notificarAdmin({
         titulo: "🔧 Solicitud de piezas",
-        mensaje: `${form.mecanico_nombre || editForm.mecanico_nombre || "Mecánico"} solicitó: ${listaPiezas} / ${editForm.cliente_nombre || "Cliente"}`,
-        url: "/"
+        mensaje: `${form.mecanico_nombre || "Mecánico"} solicitó: ${listaPiezas} / ${editForm.cliente_nombre || "Cliente"}`,
+        url: "/admin",
+        tipo: "piezas"
       });
     }
 
@@ -969,6 +1129,13 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
             <Input label="Color" value={editForm.color} onChange={(v) => setEditForm({ ...editForm, color: v })} />
             <Input label="Placa" value={editForm.placa} onChange={(v) => setEditForm({ ...editForm, placa: v.toUpperCase() })} />
             <Input label="VIN" value={editForm.vin} onChange={(v) => setEditForm({ ...editForm, vin: v.toUpperCase() })} />
+            <label style={labelStyle}>
+              Escanear VIN con cámara
+              <input type="file" accept="image/*" capture="environment" onChange={(e) => escanearVinDesdeImagen(e.target.files?.[0], "edit")} style={inputStyle} />
+            </label>
+            <button onClick={buscarVinEdit} style={blueButton} disabled={buscandoVin || escaneandoVin}>
+              {buscandoVin || escaneandoVin ? "Procesando VIN..." : "🔎 Rellenar por VIN"}
+            </button>
             <Input label="Millaje" value={editForm.millaje} onChange={(v) => setEditForm({ ...editForm, millaje: v })} />
             <label style={labelStyle}>
               Estado del trabajo
@@ -985,8 +1152,8 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
           <Textarea label="Notas del mecánico" value={editForm.notas_mecanico} onChange={(v) => setEditForm({ ...editForm, notas_mecanico: v })} />
 
           <div style={estimateBox}>
-            <h3 style={sectionTitle}>🔩 Piezas y mano de obra estimada</h3>
-            <p style={subtitleStyle}>Aquí el mecánico puede dejar las piezas solicitadas y valores estimados para que el administrador los revise, ordene piezas y genere el estimado final.</p>
+            <h3 style={sectionTitle}>🔩 Solicitud de piezas</h3>
+            <p style={subtitleStyle}>El mecánico solo solicita piezas. Los precios, costos, taxes y estimados finales los completa el administrador.</p>
 
             {(editForm.estimado_piezas || []).length === 0 ? (
               <div style={emptyStyle}>No hay piezas solicitadas todavía.</div>
@@ -996,8 +1163,8 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
                   <div key={pieza.id || index} style={pieceRowStyle}>
                     <input placeholder="Pieza" value={pieza.nombre || ""} onChange={(e) => actualizarPieza(index, "nombre", e.target.value)} style={pieceInputStyle} />
                     <input type="number" placeholder="Cant." value={pieza.cantidad || ""} onChange={(e) => actualizarPieza(index, "cantidad", e.target.value)} style={pieceSmallInputStyle} />
-                    <input type="number" placeholder="Costo" value={pieza.costo || pieza.costo_real || ""} onChange={(e) => actualizarPieza(index, "costo", e.target.value)} style={pieceSmallInputStyle} />
-                    <input type="number" placeholder="Venta" value={pieza.venta || pieza.precio_venta || pieza.precio_cliente || ""} onChange={(e) => actualizarPieza(index, "venta", e.target.value)} style={pieceSmallInputStyle} />
+                    <input placeholder="Nota opcional" value={pieza.nota || ""} onChange={(e) => actualizarPieza(index, "nota", e.target.value)} style={pieceInputStyle} />
+                    <span style={pieceStatusStyle}>{pieza.estado_pedido || "solicitada"}</span>
                     <button onClick={() => eliminarPieza(index)} style={deleteButton}>🗑</button>
                   </div>
                 ))}
@@ -1007,21 +1174,14 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
             <div style={pieceRowStyle}>
               <input placeholder="Nombre de pieza" value={piezaDraft.nombre} onChange={(e) => setPiezaDraft({ ...piezaDraft, nombre: e.target.value })} style={pieceInputStyle} />
               <input type="number" placeholder="Cant." value={piezaDraft.cantidad} onChange={(e) => setPiezaDraft({ ...piezaDraft, cantidad: e.target.value })} style={pieceSmallInputStyle} />
-              <input type="number" placeholder="Costo" value={piezaDraft.costo} onChange={(e) => setPiezaDraft({ ...piezaDraft, costo: e.target.value })} style={pieceSmallInputStyle} />
-              <input type="number" placeholder="Venta" value={piezaDraft.venta} onChange={(e) => setPiezaDraft({ ...piezaDraft, venta: e.target.value })} style={pieceSmallInputStyle} />
-              <button onClick={agregarPieza} style={storeButton}>➕ Pieza</button>
-            </div>
-
-            <div style={gridStyle}>
-              <Input label="Costo piezas" value={editForm.costo_piezas} onChange={(v) => setEditForm({ ...editForm, costo_piezas: v })} />
-              <Input label="Venta piezas estimada" value={editForm.venta_piezas} onChange={(v) => setEditForm({ ...editForm, venta_piezas: v })} />
-              <Input label="Mano de obra estimada" value={editForm.mano_obra} onChange={(v) => setEditForm({ ...editForm, mano_obra: v, estimado_mano_obra: v })} />
+              <input placeholder="Nota opcional" value={piezaDraft.nota} onChange={(e) => setPiezaDraft({ ...piezaDraft, nota: e.target.value })} style={pieceInputStyle} />
+              <span style={pieceStatusStyle}>solicitada</span>
+              <button onClick={agregarPieza} style={storeButton}>➕ Pedir pieza</button>
             </div>
 
             <div style={totalsBox}>
-              <span>Costo piezas: <strong>{dinero(editForm.costo_piezas)}</strong></span>
-              <span>Venta piezas: <strong>{dinero(editForm.venta_piezas)}</strong></span>
-              <span>Mano de obra: <strong>{dinero(editForm.mano_obra)}</strong></span>
+              <span>Piezas solicitadas: <strong>{(editForm.estimado_piezas || []).length}</strong></span>
+              <span>Los precios solo son visibles para el administrador.</span>
             </div>
           </div>
 
@@ -1067,8 +1227,12 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
           <div style={gridStyle}>
             <Input label="VIN" value={form.vin} onChange={(v) => actualizarCampo("vin", v.toUpperCase())} />
             <Input label="Placa" value={form.placa} onChange={(v) => actualizarCampo("placa", v.toUpperCase())} />
-            <button onClick={buscarVin} style={blueButton} disabled={buscandoVin}>
-              {buscandoVin ? "Buscando VIN..." : "🔎 Rellenar por VIN"}
+            <label style={labelStyle}>
+              Escanear VIN con cámara
+              <input type="file" accept="image/*" capture="environment" onChange={(e) => escanearVinDesdeImagen(e.target.files?.[0], "form")} style={inputStyle} />
+            </label>
+            <button onClick={buscarVin} style={blueButton} disabled={buscandoVin || escaneandoVin}>
+              {buscandoVin || escaneandoVin ? "Procesando VIN..." : "🔎 Rellenar por VIN"}
             </button>
           </div>
         </div>
@@ -1166,9 +1330,10 @@ const storeButton = { padding: "12px 14px", background: "#f59e0b", color: "#1118
 const emptyStyle = { background: "#111827", border: "1px solid #374151", borderRadius: "10px", padding: "14px", color: "#d1d5db", marginTop: "12px" };
 const jobListBox = { display: "grid", gap: "10px", marginTop: "12px" };
 const jobCardStyle = { display: "grid", gridTemplateColumns: "1fr auto", gap: "12px", alignItems: "center", background: "#111827", border: "1px solid #374151", borderRadius: "10px", padding: "12px" };
-const pieceRowStyle = { display: "grid", gridTemplateColumns: "2fr 90px 120px 120px auto", gap: "8px", alignItems: "center", marginTop: "10px" };
+const pieceRowStyle = { display: "grid", gridTemplateColumns: "2fr 90px 2fr 130px auto", gap: "8px", alignItems: "center", marginTop: "10px" };
 const pieceInputStyle = { ...inputStyle, minWidth: 0 };
 const pieceSmallInputStyle = { ...inputStyle, minWidth: 0 };
 const totalsBox = { display: "flex", gap: "12px", flexWrap: "wrap", background: "#111827", border: "1px solid #374151", borderRadius: "10px", padding: "12px", marginTop: "12px", color: "#d1d5db" };
+const pieceStatusStyle = { background: "#334155", color: "white", borderRadius: "999px", padding: "8px 10px", textAlign: "center", fontWeight: "bold" };
 
 export default PanelMecanico;

@@ -18,7 +18,8 @@ function Dashboard() {
     trabajosPendientesMes: [],
     trabajosPanelMecanicoHoy: 0,
     trabajosPanelMecanicoSemana: 0,
-    mecanicosPanelMecanicoActivos: 0
+    mecanicosPanelMecanicoActivos: 0,
+    piezasPendientesOrdenar: 0
   });
 
   const [ocultarTrabajosSemana, setOcultarTrabajosSemana] = useState(false);
@@ -75,9 +76,22 @@ function Dashboard() {
         );
         cargarDashboard(false);
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "trabajos_mecanicos" }, (payload) => {
+        const trabajo = payload.new || {};
+
+        if (esTrabajoDesdePanelMecanico(trabajo)) {
+          reproducirSonidoNotificacion();
+          mostrarNotificacionNavegador(
+            "Nuevo trabajo creado por mecánico",
+            `${trabajo.mecanico_nombre || trabajo.creado_por || "Mecánico"} registró ${trabajo.cliente_nombre || "cliente"}`
+          );
+        }
+
+        cargarDashboard(false);
+      })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "trabajos_mecanicos" }, (payload) => {
-        const anterior = contarPiezasEstimado(payload.old?.estimado_piezas);
-        const nuevo = contarPiezasEstimado(payload.new?.estimado_piezas);
+        const anterior = contarPiezasSolicitadasPendientes(payload.old?.estimado_piezas);
+        const nuevo = contarPiezasSolicitadasPendientes(payload.new?.estimado_piezas);
 
         if (nuevo > anterior) {
           reproducirSonidoNotificacion();
@@ -117,9 +131,22 @@ function Dashboard() {
     }
   };
 
+  const estadoPieza = (pieza) =>
+    String(pieza?.estado_pedido || pieza?.estado || "").trim().toLowerCase();
+
+  const esPiezaSolicitadaPendiente = (pieza) => {
+    const nombre = String(pieza?.nombre || pieza?.name || "").trim();
+    if (!nombre) return false;
+
+    return estadoPieza(pieza) === "solicitada";
+  };
+
   const contarPiezasEstimado = (valor) => parsearArraySeguro(valor).filter((pieza) => {
     return String(pieza?.nombre || pieza?.name || "").trim();
   }).length;
+
+  const contarPiezasSolicitadasPendientes = (valor) =>
+    parsearArraySeguro(valor).filter(esPiezaSolicitadaPendiente).length;
 
   const obtenerAudioContext = () => {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -365,23 +392,53 @@ function Dashboard() {
     });
 
     (trabajosMecanicos || []).forEach((trabajo) => {
+      const fechaTrabajo = convertirFechaSupabase(
+        trabajo.creado_en || trabajo.created_at || trabajo.hora_inicio || trabajo.actualizado_en || trabajo.updated_at
+      );
+
+      if (esTrabajoDesdePanelMecanico(trabajo)) {
+        lista.push({
+          id: `trabajo-panel-${trabajo.id}`,
+          tipo: "trabajo_panel_mecanico",
+          titulo: "🔧 Trabajo creado desde Panel Mecánico",
+          detalle: `${trabajo.cliente_nombre || "Cliente no registrado"} - ${
+            trabajo.vehiculo ||
+            `${trabajo.anio || ""} ${trabajo.marca || ""} ${trabajo.modelo || ""}`.trim() ||
+            "Vehículo no registrado"
+          }`,
+          extra: `Mecánico: ${trabajo.mecanico_nombre || trabajo.creado_por || "Sin mecánico"} / Estado: ${trabajo.estado || "diagnostico"}`,
+          fecha: fechaTrabajo ? fechaTrabajo.toISOString() : "",
+          prioridad: 2
+        });
+      }
+
       const piezas = parsearArraySeguro(trabajo.estimado_piezas)
-        .filter((pieza) => String(pieza?.nombre || pieza?.name || "").trim());
+        .filter(esPiezaSolicitadaPendiente);
 
       piezas.forEach((pieza, index) => {
-        const fecha = convertirFechaSupabase(trabajo.actualizado_en || trabajo.updated_at || trabajo.creado_en || trabajo.hora_inicio);
+        const fechaPieza = convertirFechaSupabase(
+          pieza.solicitado_en ||
+          pieza.creado_en ||
+          pieza.actualizado_en ||
+          trabajo.actualizado_en ||
+          trabajo.updated_at ||
+          trabajo.creado_en ||
+          trabajo.hora_inicio
+        );
+
         const cantidad = Number(pieza.cantidad || pieza.qty || 1);
-        const costo = Number(pieza.costo || pieza.costo_real || 0);
-        const venta = Number(pieza.venta || pieza.precio_venta || pieza.precio_cliente || 0);
+        const vehiculo = trabajo.vehiculo ||
+          `${trabajo.anio || ""} ${trabajo.marca || ""} ${trabajo.modelo || ""}`.trim() ||
+          "Vehículo no registrado";
 
         lista.push({
           id: `pieza-${trabajo.id}-${pieza.id || index}`,
           tipo: "pieza",
           titulo: "📦 Pieza solicitada por mecánico",
           detalle: `${pieza.nombre || pieza.name} x${cantidad} - ${trabajo.cliente_nombre || "Cliente no registrado"}`,
-          extra: `${trabajo.mecanico_nombre || trabajo.creado_por || "Mecánico"} / ${trabajo.vehiculo || `${trabajo.anio || ""} ${trabajo.marca || ""} ${trabajo.modelo || ""}`.trim() || "Vehículo no registrado"}${costo || venta ? ` / Costo ${dinero(costo)} / Venta ${dinero(venta)}` : ""}`,
-          fecha: fecha ? fecha.toISOString() : "",
-          prioridad: 2
+          extra: `Mecánico: ${trabajo.mecanico_nombre || trabajo.creado_por || "Sin mecánico"} / Vehículo: ${vehiculo} / Estado: solicitada`,
+          fecha: fechaPieza ? fechaPieza.toISOString() : "",
+          prioridad: 0
         });
       });
     });
@@ -920,6 +977,11 @@ function Dashboard() {
         .filter(Boolean)
     ).size;
 
+    const piezasPendientesOrdenar = trabajosMecanicos.reduce(
+      (total, trabajo) => total + contarPiezasSolicitadasPendientes(trabajo.estimado_piezas),
+      0
+    );
+
     const semana = calcularTotalesTrabajosMecanicos(trabajosMecanicosSemana);
     semana.pagosPendientes = calcularPagosPendientes(trabajosPendientesSemana);
 
@@ -957,7 +1019,8 @@ function Dashboard() {
       trabajosPendientesMes,
       trabajosPanelMecanicoHoy: trabajosPanelMecanicoHoy.length,
       trabajosPanelMecanicoSemana: trabajosPanelMecanicoSemana.length,
-      mecanicosPanelMecanicoActivos
+      mecanicosPanelMecanicoActivos,
+      piezasPendientesOrdenar
     });
 
     setOcultarTrabajosSemana(false);
@@ -1408,6 +1471,7 @@ function Dashboard() {
           <Card title="🚗 Ingresados hoy por mecánicos" value={stats.trabajosPanelMecanicoHoy} />
           <Card title="🔧 Mecánicos activos semana" value={stats.mecanicosPanelMecanicoActivos} />
           <Card title="📥 Ingresados semana / taller" value={stats.trabajosPanelMecanicoSemana} />
+          <Card title="📦 Piezas por ordenar" value={stats.piezasPendientesOrdenar} />
           <Card title="💰 Cobrado esta semana" value={dinero(stats.semana.totalCobrado)} />
           <Card title="⏳ Pendiente semana" value={dinero(stats.semana.pagosPendientes)} />
           <Card title="💰 Cobrado este mes" value={dinero(stats.mes.totalCobrado)} />
