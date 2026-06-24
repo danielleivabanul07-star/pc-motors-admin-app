@@ -52,17 +52,56 @@ export default function FirmaEstimadoCliente({ token }) {
     }
   };
 
+  const obtenerNumero = (...valores) => {
+    for (const valor of valores) {
+      if (valor === null || valor === undefined || valor === "") continue;
+      const numero = Number(valor);
+      if (!Number.isNaN(numero) && numero > 0) return numero;
+    }
+
+    return 0;
+  };
+
+  const calcularPrecioPromedioPieza = (pieza) => {
+    const precioMinimo = obtenerNumero(
+      pieza.precio_minimo,
+      pieza.precio_bajo,
+      pieza.precio_menor,
+      pieza.precio1,
+      pieza.costo,
+      pieza.costo_real
+    );
+
+    const precioMaximo = obtenerNumero(
+      pieza.precio_maximo,
+      pieza.precio_alto,
+      pieza.precio_mayor,
+      pieza.precio2,
+      pieza.precio_normal,
+      pieza.precio_venta_original
+    );
+
+    if (precioMinimo > 0 && precioMaximo > 0) {
+      return redondearDinero((precioMinimo + precioMaximo) / 2);
+    }
+
+    return redondearDinero(
+      obtenerNumero(
+        pieza.precio_promedio,
+        pieza.promedio,
+        pieza.venta,
+        pieza.precio_venta,
+        pieza.precio_cliente,
+        pieza.precio
+      )
+    );
+  };
+
   const normalizarPieza = (pieza, index = 0) => ({
     id: pieza.id || `pieza-${index}`,
     nombre: String(pieza.nombre || pieza.name || `Pieza ${index + 1}`),
     cantidad: Number(pieza.cantidad || pieza.qty || 1),
-    venta: Number(
-      pieza.venta ??
-      pieza.precio_venta ??
-      pieza.precio_cliente ??
-      pieza.precio ??
-      0
-    )
+    venta: calcularPrecioPromedioPieza(pieza)
   });
 
   const normalizarServicio = (servicio, index = 0) => ({
@@ -127,23 +166,10 @@ export default function FirmaEstimadoCliente({ token }) {
       })
     ].filter((linea) => Number(linea.base || 0) > 0);
 
-    const totalBase = lineasBase.reduce((total, linea) => total + Number(linea.base || 0), 0);
-    const totalCliente = Number(totalesBase.totalGenerado || 0);
-
-    let acumulado = 0;
-    const lineasCliente = lineasBase.map((linea, index) => {
-      const esUltima = index === lineasBase.length - 1;
-      const total = esUltima
-        ? redondearDinero(totalCliente - acumulado)
-        : redondearDinero(totalCliente * (Number(linea.base || 0) / totalBase));
-
-      acumulado = redondearDinero(acumulado + total);
-
-      return {
-        ...linea,
-        total
-      };
-    });
+    const lineasCliente = lineasBase.map((linea) => ({
+      ...linea,
+      total: redondearDinero(Number(linea.base || 0))
+    }));
 
     const lineasServicios = lineasCliente.filter((linea) => linea.tipo === "servicio");
     const lineasPiezas = lineasCliente.filter((linea) => linea.tipo === "pieza");
