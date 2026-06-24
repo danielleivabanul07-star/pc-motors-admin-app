@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
 
-const CODIGO_TALLER = "PCMOTORS2026";
+const USUARIO_TALLER = "mecanicos";
+const PASSWORD_TALLER = "0000";
 
 const construirBusqueda = (vehiculo, pieza) => {
   return [
@@ -47,7 +48,8 @@ const estadosTrabajo = [
 
 function PanelMecanico() {
   const [autorizado, setAutorizado] = useState(false);
-  const [codigo, setCodigo] = useState("");
+  const [usuario, setUsuario] = useState("");
+  const [password, setPassword] = useState("");
   const [buscandoVin, setBuscandoVin] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [piezaBuscar, setPiezaBuscar] = useState("");
@@ -649,22 +651,58 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       <div style={pageBox}>
         <div style={loginCard}>
           <h1 style={titleStyle}>🔐 Panel Mecánico</h1>
-          <p style={subtitleStyle}>Acceso privado para registrar vehículos del taller.</p>
-          <input
-            type="password"
-            placeholder="Código de acceso"
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            style={inputStyle}
-          />
+          <p style={subtitleStyle}>
+            Acceso privado para mecánicos de PC Motors.
+          </p>
+
+          <label style={labelStyle}>
+            Usuario
+            <input
+              type="text"
+              placeholder="mecanicos"
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+              style={inputStyle}
+              autoComplete="username"
+            />
+          </label>
+
+          <label style={labelStyleFull}>
+            Contraseña
+            <input
+              type="password"
+              placeholder="0000"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={inputStyle}
+              autoComplete="current-password"
+            />
+          </label>
+
           <button
             onClick={() => {
-              if (codigo === CODIGO_TALLER) setAutorizado(true);
-              else alert("Código incorrecto.");
+              const usuarioCorrecto = usuario.trim().toLowerCase() === USUARIO_TALLER;
+              const passwordCorrecto = password.trim() === PASSWORD_TALLER;
+
+              if (usuarioCorrecto && passwordCorrecto) {
+                setAutorizado(true);
+                return;
+              }
+
+              alert("Usuario o contraseña incorrectos.");
             }}
             style={primaryButton}
           >
-            Entrar
+            🔧 Entrar al panel mecánico
+          </button>
+
+          <button
+            onClick={() => {
+              window.location.href = "/";
+            }}
+            style={cancelButton}
+          >
+            ⬅ Volver al inicio
           </button>
         </div>
       </div>

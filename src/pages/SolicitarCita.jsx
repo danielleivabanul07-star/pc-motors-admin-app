@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { supabase } from "../services/supabase";
 
+const crearToken = () => {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+};
+
 export default function SolicitarCita() {
   const [form, setForm] = useState({
     nombre_cliente: "",
@@ -71,6 +78,8 @@ export default function SolicitarCita() {
 
     setGuardando(true);
 
+    const tokenConfirmacion = crearToken();
+
     const payload = {
       nombre_cliente: limpiar(form.nombre_cliente),
       telefono: limpiar(form.telefono),
@@ -93,7 +102,8 @@ export default function SolicitarCita() {
 
       estado: "solicitada",
       notas: limpiar(form.notas) || null,
-      creado_por_admin: false
+      creado_por_admin: false,
+      token_confirmacion: tokenConfirmacion
     };
 
     const { error } = await supabase.from("citas").insert([payload]);
