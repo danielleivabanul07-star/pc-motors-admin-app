@@ -10,6 +10,9 @@ const firebaseConfig = {
   appId: "1:167744412400:web:ce84033472eba7374e4035"
 };
 
+const VAPID_KEY =
+  "BGrGuBo5uJ5MbJr3H9BsJjDCtygofWBZjZPGg-hhgr83tnaPNn0oHmhCKWYbpoefx61Y9YKIaNoWbWA3rnvPudE";
+
 const app = initializeApp(firebaseConfig);
 
 export async function obtenerTokenNotificaciones() {
@@ -17,12 +20,12 @@ export async function obtenerTokenNotificaciones() {
     const soportado = await isSupported();
 
     if (!soportado) {
-      alert("Este dispositivo no es compatible con Firebase Push.");
+      alert("Este navegador no es compatible con Firebase Push.");
       return null;
     }
 
     if (!("serviceWorker" in navigator)) {
-      alert("Este dispositivo no soporta Service Worker.");
+      alert("Este navegador no soporta Service Worker.");
       return null;
     }
 
@@ -38,27 +41,45 @@ export async function obtenerTokenNotificaciones() {
       return null;
     }
 
-    const registro = await navigator.serviceWorker.register(
-      "/firebase-messaging-sw.js"
+    let registro = await navigator.serviceWorker.getRegistration(
+      "/firebase-cloud-messaging-push-scope"
     );
+
+    if (!registro) {
+      registro = await navigator.serviceWorker.register(
+        "/firebase-messaging-sw.js",
+        {
+          scope: "/firebase-cloud-messaging-push-scope"
+        }
+      );
+    }
+
+    await navigator.serviceWorker.ready;
 
     const messaging = getMessaging(app);
 
     const token = await getToken(messaging, {
-      vapidKey:
-        "BGrGuBo5uJ5MbJr3H9BsJjDCtygofWBZjZPGg-hhgr83tnaPNn0oHmhCKWYbpoefx61Y9YKIaNoWbWA3rnvPudE",
+      vapidKey: VAPID_KEY,
       serviceWorkerRegistration: registro
     });
 
     console.log("TOKEN FCM:", token);
-    return token || null;
+
+    if (!token) {
+      alert("Firebase no devolvió token push.");
+      return null;
+    }
+
+    return token;
   } catch (error) {
     console.error("ERROR FCM TOKEN:", error);
+
     alert(
       `Error obteniendo token push: ${
         error?.code || error?.message || "Error desconocido"
       }`
     );
+
     return null;
   }
 }

@@ -3590,12 +3590,28 @@ export default function ControlTrabajosMecanicos() {
       };
     });
 
+    const cambiosTrabajo = {
+      estimado_piezas: piezasActuales,
+      solicitud_piezas_estado: nuevoEstado
+    };
+
+    if (nuevoEstado === "ordenada") {
+      cambiosTrabajo.estado = "piezas_ordenadas";
+      cambiosTrabajo.fase_actual = "piezas_ordenadas";
+      cambiosTrabajo.estimado_estado = "piezas_ordenadas";
+      cambiosTrabajo.piezas_ordenadas_en = new Date().toISOString();
+    }
+
+    if (nuevoEstado === "recibida") {
+      cambiosTrabajo.estado = "piezas_recibidas";
+      cambiosTrabajo.fase_actual = "piezas_recibidas";
+      cambiosTrabajo.estimado_estado = "piezas_recibidas";
+      cambiosTrabajo.piezas_recibidas_en = new Date().toISOString();
+    }
+
     const { error } = await supabase
       .from("trabajos_mecanicos")
-      .update({
-        estimado_piezas: piezasActuales,
-        solicitud_piezas_estado: nuevoEstado
-      })
+      .update(cambiosTrabajo)
       .eq("id", trabajo.id);
 
     if (error) {
@@ -3648,11 +3664,11 @@ export default function ControlTrabajosMecanicos() {
           </div>
         </div>
 
-        {piezasSolicitadasMecanicos.length === 0 ? (
-          <div style={emptyStyle}>No hay piezas solicitadas por mecánicos todavía.</div>
+        {piezasPendientesOrdenar.length === 0 ? (
+          <div style={emptyStyle}>No hay piezas pendientes por ordenar.</div>
         ) : (
           <div style={partsRequestList}>
-            {piezasSolicitadasMecanicos.map((pieza) => (
+            {piezasPendientesOrdenar.map((pieza) => (
               <div key={`${pieza.trabajo_id}-${pieza.index}`} style={partsRequestCard}>
                 <div>
                   <strong style={{ color: "#f59e0b" }}>{pieza.nombre}</strong>
