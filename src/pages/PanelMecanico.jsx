@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createWorker } from "tesseract.js";
 import { supabase } from "../services/supabase";
 
 const USUARIO_TALLER = "mecanicos";
@@ -326,6 +327,44 @@ function PanelMecanico() {
   const calcularTotalPiezasVenta = (piezas) =>
     (piezas || []).reduce((total, pieza) => total + Number(pieza.venta || pieza.precio_venta || pieza.precio_cliente || 0) * Number(pieza.cantidad || 1), 0);
 
+  const normalizarTextoVin = (texto = "") =>
+    String(texto || "")
+      .toUpperCase()
+      .replace(/[IOQ]/g, "")
+      .replace(/[^A-HJ-NPR-Z0-9]/g, "");
+
+  const extraerVinDesdeTexto = (texto = "") => {
+    const textoLimpio = normalizarTextoVin(texto);
+    const coincidenciaExacta = textoLimpio.match(/[A-HJ-NPR-Z0-9]{17}/);
+
+    if (coincidenciaExacta?.[0]) return coincidenciaExacta[0];
+
+    const candidatos = String(texto || "")
+      .toUpperCase()
+      .replace(/[^A-HJ-NPR-Z0-9\s-]/g, " ")
+      .split(/[\s-]+/)
+      .map((parte) => normalizarTextoVin(parte))
+      .filter((parte) => parte.length >= 11 && parte.length <= 20);
+
+    const candidato17 = candidatos.find((parte) => parte.length === 17);
+    if (candidato17) return candidato17;
+
+    const unido = candidatos.join("");
+    const coincidenciaUnida = unido.match(/[A-HJ-NPR-Z0-9]{17}/);
+    return coincidenciaUnida?.[0] || "";
+  };
+
+  const leerTextoImagenConOCR = async (archivo) => {
+    const worker = await createWorker("eng");
+
+    try {
+      const { data } = await worker.recognize(archivo);
+      return data?.text || "";
+    } finally {
+      await worker.terminate();
+    }
+  };
+
   const buscarVin = async () => {
     await buscarVinPorValor(form.vin, "form");
   };
@@ -388,31 +427,53 @@ function PanelMecanico() {
   const escanearVinDesdeImagen = async (archivo, destino = "form") => {
     if (!archivo) return;
 
-    if (!("BarcodeDetector" in window)) {
-      alert("Este navegador no permite escanear VIN automáticamente. Toma la foto y escribe el VIN manualmente.");
-      return;
-    }
-
     setEscaneandoVin(true);
 
     try {
-      const formatos = ["code_39", "code_128", "qr_code", "data_matrix"];
-      const detector = new window.BarcodeDetector({ formats: formatos });
-      const bitmap = await createImageBitmap(archivo);
-      const codigos = await detector.detect(bitmap);
-      const textoDetectado = String(codigos?.[0]?.rawValue || "").toUpperCase();
-      const vin = (textoDetectado.match(/[A-HJ-NPR-Z0-9]{17}/) || [textoDetectado])[0];
+      let vinDetectado = "";
 
-      if (!vin || vin.length < 11) {
-        alert("No pude leer el VIN de la imagen. Intenta con mejor luz o escríbelo manualmente.");
+      if ("BarcodeDetector" in window) {
+        try {
+          const formatos = ["code_39", "code_128", "qr_code", "data_matrix"];
+          const detector = new window.BarcodeDetector({ formats: formatos });
+          const bitmap = await createImageBitmap(archivo);
+          const codigos = await detector.detect(bitmap);
+          const textoCodigo = String(codigos?.[0]?.rawValue || "").toUpperCase();
+          vinDetectado = extraerVinDesdeTexto(textoCodigo);
+        } catch (errorBarcode) {
+          console.log("BarcodeDetector no pudo leer el VIN, usando OCR:", errorBarcode);
+        }
+      }
+
+      if (!vinDetectado) {
+        const textoOCR = await leerTextoImagenConOCR(archivo);
+        vinDetectado = extraerVinDesdeTexto(textoOCR);
+      }
+
+      if (!vinDetectado || vinDetectado.length !== 17) {
+        alert(
+          "No pude leer un VIN completo de 17 caracteres en la foto.\n\n" +
+          "Consejos:\n" +
+          "- Toma la foto más cerca.\n" +
+          "- Usa buena luz.\n" +
+          "- Evita reflejos.\n" +
+          "- Asegúrate de que el VIN salga completo.\n\n" +
+          "También puedes escribirlo manualmente y presionar Rellenar por VIN."
+        );
         setEscaneandoVin(false);
         return;
       }
 
-      await buscarVinPorValor(vin, destino);
+      if (destino === "edit") {
+        setEditForm((prev) => ({ ...prev, vin: vinDetectado }));
+      } else {
+        setForm((prev) => ({ ...prev, vin: vinDetectado }));
+      }
+
+      await buscarVinPorValor(vinDetectado, destino);
     } catch (error) {
-      console.log("Error escaneando VIN:", error);
-      alert("No se pudo escanear el VIN. Escríbelo manualmente o intenta otra foto.");
+      console.log("Error leyendo VIN desde foto:", error);
+      alert("No se pudo leer el VIN desde la foto. Intenta otra foto o escríbelo manualmente.");
     }
 
     setEscaneandoVin(false);
@@ -727,22 +788,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
   const abrirTrabajo = (trabajo) => {
     const piezas = parsearJsonArray(trabajo.estimado_piezas).map(normalizarPieza);
+    const datosVehiculo = completarDatosVehiculo(trabajo);
 
     setTrabajoSeleccionado(trabajo);
     setEditForm({
       id: trabajo.id,
       cliente_nombre: trabajo.cliente_nombre || "",
       telefono_cliente: trabajo.telefono_cliente || trabajo.cliente_telefono || "",
-      vehiculo: trabajo.vehiculo || "",
-      anio: trabajo.anio || "",
-      marca: trabajo.marca || "",
-      modelo: trabajo.modelo || "",
-      motor: trabajo.motor || "",
-      trim: trabajo.trim || "",
-      color: trabajo.color || "",
-      placa: trabajo.placa || "",
-      vin: trabajo.vin || "",
-      millaje: trabajo.millaje || "",
+      vehiculo: trabajo.vehiculo || `${datosVehiculo.anio || ""} ${datosVehiculo.marca || ""} ${datosVehiculo.modelo || ""}`.trim(),
+      anio: datosVehiculo.anio,
+      marca: datosVehiculo.marca,
+      modelo: datosVehiculo.modelo,
+      motor: datosVehiculo.motor,
+      trim: datosVehiculo.trim,
+      color: datosVehiculo.color,
+      placa: datosVehiculo.placa,
+      vin: datosVehiculo.vin,
+      millaje: datosVehiculo.millaje,
       problema: trabajo.problema || trabajo.trabajo || trabajo.descripcion_trabajo || "",
       resultado_diagnostico: trabajo.resultado_diagnostico || "",
       notas_mecanico: trabajo.notas_mecanico || trabajo.notas || "",
@@ -832,6 +894,56 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
     return texto || anterior || "";
   };
 
+  const separarVehiculoTexto = (vehiculoTexto = "") => {
+    const texto = limpiarTexto(vehiculoTexto);
+    const partes = texto.split(/\s+/).filter(Boolean);
+
+    const resultado = {
+      anio: "",
+      marca: "",
+      modelo: ""
+    };
+
+    if (partes.length === 0) return resultado;
+
+    if (/^(19|20)\d{2}$/.test(partes[0])) {
+      resultado.anio = partes[0];
+      resultado.marca = partes[1] || "";
+      resultado.modelo = partes.slice(2).join(" ");
+      return resultado;
+    }
+
+    resultado.marca = partes[0] || "";
+    resultado.modelo = partes.slice(1).join(" ");
+    return resultado;
+  };
+
+  const completarDatosVehiculo = (trabajo = {}) => {
+    const desdeTexto = separarVehiculoTexto(trabajo.vehiculo || "");
+
+    return {
+      anio: valorNoVacio(trabajo.anio, desdeTexto.anio),
+      marca: valorNoVacio(trabajo.marca, desdeTexto.marca),
+      modelo: valorNoVacio(trabajo.modelo, desdeTexto.modelo),
+      motor: limpiarTexto(trabajo.motor),
+      trim: limpiarTexto(trabajo.trim),
+      color: limpiarTexto(trabajo.color),
+      placa: limpiarTexto(trabajo.placa).toUpperCase(),
+      vin: limpiarTexto(trabajo.vin).toUpperCase(),
+      millaje: limpiarTexto(trabajo.millaje)
+    };
+  };
+
+  const limpiarPayloadVacio = (objeto) =>
+    Object.fromEntries(
+      Object.entries(objeto).filter(([, valor]) => {
+        if (valor === undefined) return false;
+        if (valor === null) return false;
+        if (typeof valor === "string" && valor.trim() === "") return false;
+        return true;
+      })
+    );
+
   const sincronizarRelacionesTrabajo = async (trabajoBase, datos) => {
     try {
       if (trabajoBase?.cliente_id) {
@@ -846,19 +958,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       }
 
       if (trabajoBase?.vehiculo_id) {
-        await supabase
-          .from("vehiculos")
-          .update({
-            anio: datos.anio || null,
-            marca: datos.marca || null,
-            modelo: datos.modelo || null,
-            color: datos.color || null,
-            placa: datos.placa || null,
-            vin: datos.vin || null,
-            millaje: datos.millaje || null,
-            notas: `${datos.vehiculo || ""}${datos.motor ? ` / Motor: ${datos.motor}` : ""}${datos.trim ? ` / Trim: ${datos.trim}` : ""}`.trim() || null
-          })
-          .eq("id", trabajoBase.vehiculo_id);
+        const vehiculoUpdate = limpiarPayloadVacio({
+          anio: datos.anio,
+          marca: datos.marca,
+          modelo: datos.modelo,
+          color: datos.color,
+          placa: datos.placa,
+          vin: datos.vin,
+          millaje: datos.millaje,
+          notas: `${datos.vehiculo || ""}${datos.motor ? ` / Motor: ${datos.motor}` : ""}${datos.trim ? ` / Trim: ${datos.trim}` : ""}`.trim()
+        });
+
+        if (Object.keys(vehiculoUpdate).length > 0) {
+          await supabase
+            .from("vehiculos")
+            .update(vehiculoUpdate)
+            .eq("id", trabajoBase.vehiculo_id);
+        }
       }
 
       if (trabajoBase?.orden_id) {
@@ -887,9 +1003,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
     setGuardandoTrabajo(true);
 
-    const anioFinal = valorNoVacio(editForm.anio, trabajoSeleccionado.anio);
-    const marcaFinal = valorNoVacio(editForm.marca, trabajoSeleccionado.marca);
-    const modeloFinal = valorNoVacio(editForm.modelo, trabajoSeleccionado.modelo);
+    const datosVehiculoBase = completarDatosVehiculo({
+      ...trabajoSeleccionado,
+      vehiculo: editForm.vehiculo || trabajoSeleccionado.vehiculo,
+      anio: editForm.anio || trabajoSeleccionado.anio,
+      marca: editForm.marca || trabajoSeleccionado.marca,
+      modelo: editForm.modelo || trabajoSeleccionado.modelo,
+      motor: editForm.motor || trabajoSeleccionado.motor,
+      trim: editForm.trim || trabajoSeleccionado.trim,
+      color: editForm.color || trabajoSeleccionado.color,
+      placa: editForm.placa || trabajoSeleccionado.placa,
+      vin: editForm.vin || trabajoSeleccionado.vin,
+      millaje: editForm.millaje || trabajoSeleccionado.millaje
+    });
+
+    const anioFinal = datosVehiculoBase.anio;
+    const marcaFinal = datosVehiculoBase.marca;
+    const modeloFinal = datosVehiculoBase.modelo;
     const vehiculoTexto = limpiarTexto(editForm.vehiculo) || limpiarTexto(trabajoSeleccionado.vehiculo) || `${anioFinal || ""} ${marcaFinal || ""} ${modeloFinal || ""}`.trim();
     const piezas = (editForm.estimado_piezas || []).map(normalizarPieza).filter((pieza) => pieza.nombre);
     const costoPiezas = calcularTotalPiezasCosto(piezas);
@@ -903,12 +1033,12 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       anio: anioFinal,
       marca: marcaFinal,
       modelo: modeloFinal,
-      motor: valorNoVacio(editForm.motor, trabajoSeleccionado.motor),
-      trim: valorNoVacio(editForm.trim, trabajoSeleccionado.trim),
-      color: valorNoVacio(editForm.color, trabajoSeleccionado.color),
-      placa: valorNoVacio(editForm.placa, trabajoSeleccionado.placa).toUpperCase(),
-      vin: valorNoVacio(editForm.vin, trabajoSeleccionado.vin).toUpperCase(),
-      millaje: valorNoVacio(editForm.millaje, trabajoSeleccionado.millaje),
+      motor: datosVehiculoBase.motor,
+      trim: datosVehiculoBase.trim,
+      color: datosVehiculoBase.color,
+      placa: datosVehiculoBase.placa,
+      vin: datosVehiculoBase.vin,
+      millaje: datosVehiculoBase.millaje,
       problema,
       trabajo: problema,
       descripcion_trabajo: problema,
@@ -1130,7 +1260,7 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
             <Input label="Placa" value={editForm.placa} onChange={(v) => setEditForm({ ...editForm, placa: v.toUpperCase() })} />
             <Input label="VIN" value={editForm.vin} onChange={(v) => setEditForm({ ...editForm, vin: v.toUpperCase() })} />
             <label style={labelStyle}>
-              Escanear VIN con cámara
+              Leer VIN desde foto
               <input type="file" accept="image/*" capture="environment" onChange={(e) => escanearVinDesdeImagen(e.target.files?.[0], "edit")} style={inputStyle} />
             </label>
             <button onClick={buscarVinEdit} style={blueButton} disabled={buscandoVin || escaneandoVin}>
@@ -1228,7 +1358,7 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
             <Input label="VIN" value={form.vin} onChange={(v) => actualizarCampo("vin", v.toUpperCase())} />
             <Input label="Placa" value={form.placa} onChange={(v) => actualizarCampo("placa", v.toUpperCase())} />
             <label style={labelStyle}>
-              Escanear VIN con cámara
+              Leer VIN desde foto
               <input type="file" accept="image/*" capture="environment" onChange={(e) => escanearVinDesdeImagen(e.target.files?.[0], "form")} style={inputStyle} />
             </label>
             <button onClick={buscarVin} style={blueButton} disabled={buscandoVin || escaneandoVin}>
