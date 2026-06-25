@@ -715,19 +715,6 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       ) {
         const trabajoBasico = { ...nuevoTrabajo };
         delete trabajoBasico.cliente_telefono;
-        delete trabajoBasico.telefono_cliente;
-        delete trabajoBasico.problema;
-        delete trabajoBasico.descripcion_trabajo;
-        delete trabajoBasico.anio;
-        delete trabajoBasico.marca;
-        delete trabajoBasico.modelo;
-        delete trabajoBasico.motor;
-        delete trabajoBasico.trim;
-        delete trabajoBasico.tipo_vehiculo;
-        delete trabajoBasico.color;
-        delete trabajoBasico.placa;
-        delete trabajoBasico.vin;
-        delete trabajoBasico.millaje;
         delete trabajoBasico.estimado_mano_obra;
         delete trabajoBasico.estimado_piezas;
 
@@ -789,22 +776,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
   const abrirTrabajo = (trabajo) => {
     const piezas = parsearJsonArray(trabajo.estimado_piezas).map(normalizarPieza);
+    const datosVehiculo = completarDatosVehiculo(trabajo);
 
     setTrabajoSeleccionado(trabajo);
     setEditForm({
       id: trabajo.id,
       cliente_nombre: trabajo.cliente_nombre || "",
       telefono_cliente: trabajo.telefono_cliente || trabajo.cliente_telefono || "",
-      vehiculo: trabajo.vehiculo || "",
-      anio: trabajo.anio || "",
-      marca: trabajo.marca || "",
-      modelo: trabajo.modelo || "",
-      motor: trabajo.motor || "",
-      trim: trabajo.trim || "",
-      color: trabajo.color || "",
-      placa: trabajo.placa || "",
-      vin: trabajo.vin || "",
-      millaje: trabajo.millaje || "",
+      vehiculo: trabajo.vehiculo || `${datosVehiculo.anio || ""} ${datosVehiculo.marca || ""} ${datosVehiculo.modelo || ""}`.trim(),
+      anio: datosVehiculo.anio,
+      marca: datosVehiculo.marca,
+      modelo: datosVehiculo.modelo,
+      motor: datosVehiculo.motor,
+      trim: datosVehiculo.trim,
+      color: datosVehiculo.color,
+      placa: datosVehiculo.placa,
+      vin: datosVehiculo.vin,
+      millaje: datosVehiculo.millaje,
       problema: trabajo.problema || trabajo.trabajo || trabajo.descripcion_trabajo || "",
       resultado_diagnostico: trabajo.resultado_diagnostico || "",
       notas_mecanico: trabajo.notas_mecanico || trabajo.notas || "",
@@ -894,6 +882,56 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
     return texto || anterior || "";
   };
 
+  const separarVehiculoTexto = (vehiculoTexto = "") => {
+    const texto = limpiarTexto(vehiculoTexto);
+    const partes = texto.split(/\s+/).filter(Boolean);
+
+    const resultado = {
+      anio: "",
+      marca: "",
+      modelo: ""
+    };
+
+    if (partes.length === 0) return resultado;
+
+    if (/^(19|20)\d{2}$/.test(partes[0])) {
+      resultado.anio = partes[0];
+      resultado.marca = partes[1] || "";
+      resultado.modelo = partes.slice(2).join(" ");
+      return resultado;
+    }
+
+    resultado.marca = partes[0] || "";
+    resultado.modelo = partes.slice(1).join(" ");
+    return resultado;
+  };
+
+  const completarDatosVehiculo = (trabajo = {}) => {
+    const desdeTexto = separarVehiculoTexto(trabajo.vehiculo || "");
+
+    return {
+      anio: valorNoVacio(trabajo.anio, desdeTexto.anio),
+      marca: valorNoVacio(trabajo.marca, desdeTexto.marca),
+      modelo: valorNoVacio(trabajo.modelo, desdeTexto.modelo),
+      motor: limpiarTexto(trabajo.motor),
+      trim: limpiarTexto(trabajo.trim),
+      color: limpiarTexto(trabajo.color),
+      placa: limpiarTexto(trabajo.placa).toUpperCase(),
+      vin: limpiarTexto(trabajo.vin).toUpperCase(),
+      millaje: limpiarTexto(trabajo.millaje)
+    };
+  };
+
+  const limpiarPayloadVacio = (objeto) =>
+    Object.fromEntries(
+      Object.entries(objeto).filter(([, valor]) => {
+        if (valor === undefined) return false;
+        if (valor === null) return false;
+        if (typeof valor === "string" && valor.trim() === "") return false;
+        return true;
+      })
+    );
+
   const sincronizarRelacionesTrabajo = async (trabajoBase, datos) => {
     try {
       if (trabajoBase?.cliente_id) {
@@ -908,19 +946,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       }
 
       if (trabajoBase?.vehiculo_id) {
-        await supabase
-          .from("vehiculos")
-          .update({
-            anio: datos.anio || null,
-            marca: datos.marca || null,
-            modelo: datos.modelo || null,
-            color: datos.color || null,
-            placa: datos.placa || null,
-            vin: datos.vin || null,
-            millaje: datos.millaje || null,
-            notas: `${datos.vehiculo || ""}${datos.motor ? ` / Motor: ${datos.motor}` : ""}${datos.trim ? ` / Trim: ${datos.trim}` : ""}`.trim() || null
-          })
-          .eq("id", trabajoBase.vehiculo_id);
+        const vehiculoUpdate = limpiarPayloadVacio({
+          anio: datos.anio,
+          marca: datos.marca,
+          modelo: datos.modelo,
+          color: datos.color,
+          placa: datos.placa,
+          vin: datos.vin,
+          millaje: datos.millaje,
+          notas: `${datos.vehiculo || ""}${datos.motor ? ` / Motor: ${datos.motor}` : ""}${datos.trim ? ` / Trim: ${datos.trim}` : ""}`.trim()
+        });
+
+        if (Object.keys(vehiculoUpdate).length > 0) {
+          await supabase
+            .from("vehiculos")
+            .update(vehiculoUpdate)
+            .eq("id", trabajoBase.vehiculo_id);
+        }
       }
 
       if (trabajoBase?.orden_id) {
@@ -949,9 +991,23 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
 
     setGuardandoTrabajo(true);
 
-    const anioFinal = valorNoVacio(editForm.anio, trabajoSeleccionado.anio);
-    const marcaFinal = valorNoVacio(editForm.marca, trabajoSeleccionado.marca);
-    const modeloFinal = valorNoVacio(editForm.modelo, trabajoSeleccionado.modelo);
+    const datosVehiculoBase = completarDatosVehiculo({
+      ...trabajoSeleccionado,
+      vehiculo: editForm.vehiculo || trabajoSeleccionado.vehiculo,
+      anio: editForm.anio || trabajoSeleccionado.anio,
+      marca: editForm.marca || trabajoSeleccionado.marca,
+      modelo: editForm.modelo || trabajoSeleccionado.modelo,
+      motor: editForm.motor || trabajoSeleccionado.motor,
+      trim: editForm.trim || trabajoSeleccionado.trim,
+      color: editForm.color || trabajoSeleccionado.color,
+      placa: editForm.placa || trabajoSeleccionado.placa,
+      vin: editForm.vin || trabajoSeleccionado.vin,
+      millaje: editForm.millaje || trabajoSeleccionado.millaje
+    });
+
+    const anioFinal = datosVehiculoBase.anio;
+    const marcaFinal = datosVehiculoBase.marca;
+    const modeloFinal = datosVehiculoBase.modelo;
     const vehiculoTexto = limpiarTexto(editForm.vehiculo) || limpiarTexto(trabajoSeleccionado.vehiculo) || `${anioFinal || ""} ${marcaFinal || ""} ${modeloFinal || ""}`.trim();
     const piezas = (editForm.estimado_piezas || []).map(normalizarPieza).filter((pieza) => pieza.nombre);
     const costoPiezas = calcularTotalPiezasCosto(piezas);
@@ -965,12 +1021,12 @@ Pega con CTRL + V dentro de la tienda para buscar la pieza.`
       anio: anioFinal,
       marca: marcaFinal,
       modelo: modeloFinal,
-      motor: valorNoVacio(editForm.motor, trabajoSeleccionado.motor),
-      trim: valorNoVacio(editForm.trim, trabajoSeleccionado.trim),
-      color: valorNoVacio(editForm.color, trabajoSeleccionado.color),
-      placa: valorNoVacio(editForm.placa, trabajoSeleccionado.placa).toUpperCase(),
-      vin: valorNoVacio(editForm.vin, trabajoSeleccionado.vin).toUpperCase(),
-      millaje: valorNoVacio(editForm.millaje, trabajoSeleccionado.millaje),
+      motor: datosVehiculoBase.motor,
+      trim: datosVehiculoBase.trim,
+      color: datosVehiculoBase.color,
+      placa: datosVehiculoBase.placa,
+      vin: datosVehiculoBase.vin,
+      millaje: datosVehiculoBase.millaje,
       problema,
       trabajo: problema,
       descripcion_trabajo: problema,
